@@ -65,7 +65,7 @@ where
     };
 
     #[allow(unreachable_patterns)]
-    let buffer = match header.document_type() {
+    let buffer: &[u8] = match header.document_type() {
         DocumentType::Uncompressed => {
             let mut parser = Parser::new(reader, builder);
             return match parser.parse() {
@@ -107,6 +107,7 @@ mod test {
     use arc::Inner;
     use parse;
 
+    #[cfg(feature = "comp-snappy")]
     #[test]
     fn simple_snappy() {
         let raw = b"\x3d\xf3\x72\x6c\x23\x00\xb8\x00\x84\x08\x10\x28\x2b\x80\x08\x00\xfe\x01\x00\xfe\x01\x00\xfe\x01\x00\xfe\x01\x00\xfe\x01\x00\xfe\x01\x00\xfe\x01\x00\xfe\x01\x00\xfe\x01\x00\xfe\x01\x00\xfe\x01\x00\xfe\x01\x00\xfe\x01\x00\xfe\x01\x00\xfe\x01\x00\xfa\x01\x00";
@@ -116,6 +117,7 @@ mod test {
                 vec![ Value::new(Inner::U64(0)); 1024 ])))));
     }
 
+    #[cfg(feature = "comp-zlib")]
     #[test]
     fn simple_zlib() {
         let raw = b"\x3d\xf3\x72\x6c\x33\x00\x84\x08\x9d\x00\x78\x01\xed\xc0\x31\x0d\x00\x00\x0c\x02\xc1\x8e\x95\x42\x82\x49\xa4\x23\x84\x3f\x39\x7f\x00\x66\x15\x72\x5a\x00\xdc";
