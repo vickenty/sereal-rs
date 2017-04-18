@@ -2,6 +2,7 @@ use std::io;
 use std::result;
 use std::collections::HashMap;
 
+use config::Config;
 use lexer;
 use lexer::Lexer;
 use lexer::Tag;
@@ -86,9 +87,9 @@ pub struct Parser<R, B: Builder> {
 }
 
 impl<R: io::Read + io::Seek, B: Builder> Parser<R, B> {
-    pub fn new(reader: R, builder: B) -> Parser<R, B> {
+    pub fn new(reader: R, builder: B, config: Config) -> Parser<R, B> {
         Parser {
-            lexer: Lexer::new(reader),
+            lexer: Lexer::new(reader, config),
             track: HashMap::new(),
             builder: builder,
         }
@@ -184,6 +185,6 @@ impl<R: io::Read + io::Seek, B: Builder> Parser<R, B> {
 }
 
 pub fn parse<B: Builder>(s: &[u8], builder: B) -> Result<B::Value> {
-    let mut p = Parser::new(io::Cursor::new(s), builder);
+    let mut p = Parser::new(io::Cursor::new(s), builder, Config::default());
     p.parse()
 }

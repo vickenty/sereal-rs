@@ -7,10 +7,13 @@ use sereal_common::constants::*;
 use varint;
 use varint::VarintReaderExt;
 
+use config::Config;
+
 #[derive(Debug)]
 pub enum Error {
     IOError(io::Error),
     VarintOverflow,
+    StringTooLarge(u64),
     UnknownTag(u8),
 }
 
@@ -94,6 +97,7 @@ pub struct Token {
 }
 
 pub struct Lexer<R> {
+    config: Config,
     input: R,
 }
 
@@ -174,8 +178,9 @@ impl<R: io::Read + io::Seek> Lexer<R> {
 }
 
 impl<R> Lexer<R> where R: io::Read + io::Seek {
-    pub fn new(r: R) -> Lexer<R> {
+    pub fn new(r: R, config: Config) -> Lexer<R> {
         Lexer {
+            config: config,
             input: r
         }
     }
@@ -197,7 +202,11 @@ impl<R> Lexer<R> where R: io::Read + io::Seek {
         Ok(self.input.read_zigzag()?)
     }
 
-    fn read_bytes(&mut self, len: u64) -> io::Result<Vec<u8>> {
+    fn read_bytes(&mut self, len: u64) -> Result<Vec<u8>> {
+        if len > self.config.max_string_len() {
+            return Err(Error::StringTooLarge(len));
+        }
+
         let mut buf = vec![0; len as usize];
         self.input.read_exact(&mut buf)?;
         Ok(buf)
@@ -214,5 +223,5 @@ impl<R> Lexer<R> where R: io::Read + io::Seek {
 }
 
 pub fn from_slice(s: &[u8]) -> Lexer<io::Cursor<&[u8]>> {
-    Lexer::new(io::Cursor::new(s))
+    Lexer::new(io::Cursor::new(s), Config::default())
 }

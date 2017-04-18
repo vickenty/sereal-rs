@@ -67,7 +67,7 @@ where
     #[allow(unreachable_patterns)]
     let buffer: Vec<u8> = match header.document_type() {
         DocumentType::Uncompressed => {
-            let mut parser = Parser::new(reader, builder);
+            let mut parser = Parser::new(reader, builder, config);
             return match parser.parse() {
                 Ok(val) => Ok(val),
                 Err(_) => Err(io::Error::new(io::ErrorKind::Other, "")),
@@ -76,23 +76,38 @@ where
 
         #[cfg(feature = "comp-snappy")]
         DocumentType::Snappy { compressed_size } => {
+            if compressed_size > config.max_compressed_size() {
+                return Err(io::Error::new(io::ErrorKind::Other, ""));
+            }
             read_snappy_body(reader, compressed_size)?
         },
 
         #[cfg(feature = "comp-zlib")]
         DocumentType::ZLib { compressed_size, uncompressed_size } => {
+            if compressed_size > config.max_compressed_size() {
+                return Err(io::Error::new(io::ErrorKind::Other, ""));
+            }
+
+            if uncompressed_size > config.max_uncompressed_size() {
+                return Err(io::Error::new(io::ErrorKind::Other, ""));
+            }
+
             read_zlib_body(reader, compressed_size, uncompressed_size)?
         },
 
         #[cfg(feature = "comp-zstd")]
         DocumentType::ZStd { compressed_size } => {
+            if compressed_size > config.max_compressed_size() {
+                return Err(io::Error::new(io::ErrorKind::Other, ""));
+            }
+
             read_zstd_body(reader, compressed_size)?
         },
 
         _ => return Err(io::Error::new(io::ErrorKind::Other, "")),
     };
 
-    let mut parser = Parser::new(io::Cursor::new(&buffer), builder);
+    let mut parser = Parser::new(io::Cursor::new(&buffer), builder, config);
     match parser.parse() {
         Ok(val) => Ok(val),
         Err(_) => Err(io::Error::new(io::ErrorKind::Other, "")),
