@@ -1,0 +1,9 @@
+[package]
+name = "sereal_dump"
+version = "0.1.0"
+authors = ["Vickenty Fesunov <kent@setattr.net>"]
+license = "MIT/Apache-2.0"
+
+[dependencies]
+sereal_decoder = { path = "../decoder" }
+clap = "2.23"

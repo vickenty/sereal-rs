@@ -3,4 +3,5 @@ members = [
 	"common",
 	"encoder",
 	"decoder",
+	"dump",
 ]
