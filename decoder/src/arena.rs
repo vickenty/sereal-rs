@@ -114,7 +114,7 @@ pub struct ArenaBuilder<'a> {
 
 impl<'a> ArenaBuilder<'a> {
     pub fn new(arena: &'a Arena<'a>) -> ArenaBuilder<'a> {
-        ArenaBuilder { arena }
+        ArenaBuilder { arena: arena }
     }
 }
 
