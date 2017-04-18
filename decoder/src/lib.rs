@@ -65,7 +65,7 @@ where
     };
 
     #[allow(unreachable_patterns)]
-    let buffer: &[u8] = match header.document_type() {
+    let buffer: Vec<u8> = match header.document_type() {
         DocumentType::Uncompressed => {
             let mut parser = Parser::new(reader, builder);
             return match parser.parse() {
