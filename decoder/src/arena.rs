@@ -1,9 +1,11 @@
 use std::cell::RefCell;
-use typed_arena::Arena;
+use typed_arena;
 
 use parser;
 pub use parser::Error;
 pub use parser::Result;
+
+pub type Arena<'a> = typed_arena::Arena<RefCell<Inner<'a>>>;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Inner<'a> {
@@ -23,7 +25,7 @@ pub enum Inner<'a> {
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]
-pub struct Value<'a>(&'a RefCell<Inner<'a>>);
+pub struct Value<'a>(pub &'a RefCell<Inner<'a>>);
 
 impl<'a> parser::Value for Value<'a> {
     type Array = Vec<Value<'a>>;
@@ -107,7 +109,13 @@ impl<'a> Value<'a> {
 }
 
 pub struct ArenaBuilder<'a> {
-    arena: &'a Arena<RefCell<Inner<'a>>>,
+    arena: &'a Arena<'a>,
+}
+
+impl<'a> ArenaBuilder<'a> {
+    pub fn new(arena: &'a Arena<'a>) -> ArenaBuilder<'a> {
+        ArenaBuilder { arena }
+    }
 }
 
 impl<'a> parser::Builder for ArenaBuilder<'a> {
@@ -150,7 +158,7 @@ impl<'a> parser::HashBuilder<Value<'a>> for Vec<(Value<'a>, Value<'a>)> {
     }
 }
 
-pub fn parse<'a>(s: &[u8], arena: &'a Arena<RefCell<Inner<'a>>>) -> Result<Value<'a>> {
+pub fn parse<'a>(s: &[u8], arena: &'a Arena<'a>) -> Result<Value<'a>> {
     let builder = ArenaBuilder { arena: arena };
     parser::parse(s, builder)
 }

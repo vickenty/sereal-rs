@@ -1,3 +1,17 @@
+pub const MAGIC_V1: u32 = 0x6C72733D;
+pub const MAGIC_V3: u32 = 0x6C72F33D;
+
+pub const PROTO_V2: u8 = 2;
+pub const PROTO_V3: u8 = 3;
+pub const PROTO_V4: u8 = 4;
+
+pub const TYPE_RAW: u8 = 0;
+pub const TYPE_SNAPPY: u8 = 2;
+pub const TYPE_ZLIB: u8 = 3;
+pub const TYPE_ZSTD: u8 = 4;
+
+pub const OPT_USER_METADATA: u8 = 1;
+
 pub const POS_0: u8 = 0x00;
 pub const POS_1: u8 = 0x01;
 pub const POS_2: u8 = 0x02;

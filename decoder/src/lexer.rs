@@ -4,6 +4,9 @@ use std::result;
 use byteorder::{ LittleEndian, ReadBytesExt };
 use sereal_common::constants::*;
 
+use varint;
+use varint::VarintReaderExt;
+
 #[derive(Debug)]
 pub enum Error {
     IOError(io::Error),
@@ -41,6 +44,15 @@ impl Error {
 impl From<io::Error> for Error {
     fn from(e: io::Error) -> Error {
         Error::IOError(e)
+    }
+}
+
+impl From<varint::Error> for Error {
+    fn from(e: varint::Error) -> Error {
+        match e {
+            varint::Error::Overflow => Error::VarintOverflow,
+            varint::Error::IOError(e) => Error::IOError(e),
+        }
     }
 }
 
@@ -92,7 +104,7 @@ impl<R: io::Read + io::Seek> Lexer<R> {
         let trk = tag & TRACK_BIT == TRACK_BIT;
         let tag = tag & TYPE_MASK;
 
-        let value = match tag & TYPE_MASK {
+        let value = match tag {
             POS_0...
             POS_15 => Tag::Pos(tag),
 
@@ -178,27 +190,11 @@ impl<R> Lexer<R> where R: io::Read + io::Seek {
     }
 
     fn read_varint(&mut self) -> Result<u64> {
-        let mut a = 0;
-        let mut o = 0;
-
-        loop {
-            let i = self.input.read_u8()?;
-            a |= ((i & 0x7f) as u64) << o;
-
-            if i & 0x80 == 0 {
-                return Ok(a);
-            }
-
-            o += 7;
-            if o >= 64 {
-                return Err(Error::VarintOverflow);
-            }
-        }
+        Ok(self.input.read_varint()?)
     }
 
     fn read_zigzag(&mut self) -> Result<i64> {
-        let v = self.read_varint()?;
-        Ok((v >> 1) as i64 ^ -((v & 1) as i64))
+        Ok(self.input.read_zigzag()?)
     }
 
     fn read_bytes(&mut self, len: u64) -> io::Result<Vec<u8>> {
@@ -219,66 +215,4 @@ impl<R> Lexer<R> where R: io::Read + io::Seek {
 
 pub fn from_slice(s: &[u8]) -> Lexer<io::Cursor<&[u8]>> {
     Lexer::new(io::Cursor::new(s))
-}
-
-#[test]
-fn test_varint() {
-    use std::u64::MAX;
-
-    fn r(s: &[u8]) -> Result<u64> {
-        from_slice(s).read_varint()
-    }
-
-    fn t(s: &[u8]) -> u64 {
-        r(s).unwrap()
-    }
-
-    fn e(s: &[u8]) -> Error {
-        r(s).unwrap_err()
-    }
-
-    assert_eq!(t(b"\x00"), 0);
-    assert_eq!(t(b"\x01"), 1);
-    assert_eq!(t(b"\x80\x01"), 128);
-    assert_eq!(t(b"\x80\x80\x01"), 16384);
-    assert_eq!(t(b"\x81\x01"), 129);
-    assert_eq!(t(b"\x81\x81\x00"), 129);
-    assert_eq!(t(b"\x80\x80\x80\x80\x80\x80\x80\x80\x80\x00"), 0);
-    assert_eq!(t(b"\xff\xff\xff\xff\xff\xff\xff\xff\xff\x7f"), MAX);
-
-    assert!(e(b"\x80").is_eof());
-    assert!(e(b"\x80\x80\x80\x80\x80\x80\x80\x80\x80\x80\x00").is_varint_overflow());
-}
-
-#[test]
-fn test_zigzag() {
-    use std::i64::{ MIN, MAX };
-
-    fn r(s: &[u8]) -> Result<i64> {
-        from_slice(s).read_zigzag()
-    }
-
-    fn t(s: &[u8]) -> i64 {
-        r(s).unwrap()
-    }
-
-    fn e(s: &[u8]) -> Error {
-        r(s).unwrap_err()
-    }
-
-    assert_eq!(t(b"\x00"), 0);
-    assert_eq!(t(b"\x01"), -1);
-    assert_eq!(t(b"\x02"), 1);
-    assert_eq!(t(b"\x03"), -2);
-    assert_eq!(t(b"\x04"), 2);
-    assert_eq!(t(b"\x80\x01"), 64);
-    assert_eq!(t(b"\x80\x80\x01"), 8192);
-    assert_eq!(t(b"\x81\x01"), -65);
-    assert_eq!(t(b"\x81\x81\x00"), -65);
-    assert_eq!(t(b"\x80\x80\x80\x80\x80\x80\x80\x80\x80\x00"), 0);
-    assert_eq!(t(b"\xfe\xff\xff\xff\xff\xff\xff\xff\xff\x7f"), MAX);
-    assert_eq!(t(b"\xff\xff\xff\xff\xff\xff\xff\xff\xff\x7f"), MIN);
-
-    assert!(e(b"\x80").is_eof());
-    assert!(e(b"\x80\x80\x80\x80\x80\x80\x80\x80\x80\x80\x00").is_varint_overflow());
 }

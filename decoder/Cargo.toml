@@ -15,7 +15,7 @@ flate2 = { version = "0.2", optional = true }
 zstd = { version = "0.4", optional = true }
 
 [features]
-default = [ "v2", "v3", "v4" ]
-v2 = [ "snap" ]
-v3 = [ "flate2" ]
-v4 = [ "zstd" ]
+default = [ "comp-snappy", "comp-zlib", "comp-zstd" ]
+comp-snappy = [ "snap" ]
+comp-zlib = [ "flate2" ]
+comp-zstd = [ "zstd" ]

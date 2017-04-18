@@ -94,7 +94,7 @@ impl<R: io::Read + io::Seek, B: Builder> Parser<R, B> {
         }
     }
 
-    fn parse(&mut self) -> Result<B::Value> {
+    pub fn parse(&mut self) -> Result<B::Value> {
         self.parse_inner(false)
     }
 

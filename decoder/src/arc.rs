@@ -36,7 +36,7 @@ impl fmt::Debug for Value {
 }
 
 impl Value {
-    fn new(v: Inner) -> Value {
+    pub fn new(v: Inner) -> Value {
         Value::Strong(Arc::new(RwLock::new(v)))
     }
 
@@ -257,7 +257,7 @@ impl parser::Value for Value {
     }
 }
 
-struct ArcBuilder;
+pub struct ArcBuilder;
 
 impl parser::Builder for ArcBuilder {
     type Value = Value;
