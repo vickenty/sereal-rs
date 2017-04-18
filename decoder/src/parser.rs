@@ -11,6 +11,7 @@ use lexer::Tag;
 pub enum Error {
     InvalidType,
     InvalidRef(u64),
+    InvalidCopy,
     LexerError(lexer::Error),
 }
 
@@ -18,6 +19,13 @@ impl Error {
     pub fn is_eof(&self) -> bool {
         match *self {
             Error::LexerError(ref e) => e.is_eof(),
+            _ => false,
+        }
+    }
+
+    pub fn is_invalid_copy(&self) -> bool {
+        match *self {
+            Error::InvalidCopy => true,
             _ => false,
         }
     }
@@ -84,6 +92,7 @@ pub struct Parser<R, B: Builder> {
     lexer: Lexer<R>,
     track: HashMap<u64, B::Value>,
     builder: B,
+    copy_pos: u64,
 }
 
 impl<R: io::Read + io::Seek, B: Builder> Parser<R, B> {
@@ -92,6 +101,7 @@ impl<R: io::Read + io::Seek, B: Builder> Parser<R, B> {
             lexer: Lexer::new(reader, config),
             track: HashMap::new(),
             builder: builder,
+            copy_pos: 0,
         }
     }
 
@@ -99,8 +109,12 @@ impl<R: io::Read + io::Seek, B: Builder> Parser<R, B> {
         self.parse_inner(false)
     }
 
-    fn parse_track(&mut self) -> Result<B::Value> {
-        self.parse_inner(true)
+    fn parse_str(&mut self, force_track: bool) -> Result<B::Value> {
+        let saved = self.copy_pos;
+        self.copy_pos = 0;
+        let res = self.parse_inner(force_track);
+        self.copy_pos = saved;
+        res
     }
 
     fn parse_inner(&mut self, force_track: bool) -> Result<B::Value> {
@@ -129,6 +143,13 @@ impl<R: io::Read + io::Seek, B: Builder> Parser<R, B> {
             Tag::Refn => value.set_ref(self.parse()?),
             Tag::Refp(p) => value.set_ref(self.get(p)?),
             Tag::Alias(p) => value.set_alias(self.get(p)?),
+            Tag::Copy(pos) => {
+                self.enter_copy(pos)?;
+                let val = self.parse()?;
+                self.leave_copy()?;
+
+                value.set_alias(val);
+            },
             Tag::Weaken => value.set_weak_ref(self.parse()?),
 
             Tag::Array(c) => value.set_array(self.parse_array(c)?),
@@ -149,9 +170,9 @@ impl<R: io::Read + io::Seek, B: Builder> Parser<R, B> {
             Tag::Bin(v) => value.set_binary(&v),
             Tag::Str(v) => value.set_string(&v),
 
-            Tag::Object => value.set_object(self.parse_track()?, self.parse()?)?,
+            Tag::Object => value.set_object(self.parse_str(true)?, self.parse()?)?,
             Tag::ObjectV(o) => value.set_object(self.get(o)?, self.parse()?)?,
-            Tag::ObjectFreeze => value.set_object_freeze(self.parse_track()?, self.parse()?)?,
+            Tag::ObjectFreeze => value.set_object_freeze(self.parse_str(true)?, self.parse()?)?,
             Tag::ObjectVFreeze(o) => value.set_object_freeze(self.get(o)?, self.parse()?)?,
 
             Tag::Regexp => value.set_regexp(self.parse()?, self.parse()?)?,
@@ -176,11 +197,27 @@ impl<R: io::Read + io::Seek, B: Builder> Parser<R, B> {
     fn parse_hash(&mut self, count: u64) -> Result<<B::Value as Value>::Hash> {
         let mut m = self.builder.build_hash(count);
         for _ in 0..count {
-            let k = self.parse()?;
+            let k = self.parse_str(false)?;
             let v = self.parse()?;
             m.insert(k, v)?;
         }
         Ok(m.finalize())
+    }
+
+    fn enter_copy(&mut self, pos: u64) -> Result<()> {
+        if self.copy_pos != 0 {
+            return Err(Error::InvalidCopy);
+        }
+
+        self.copy_pos = self.lexer.tell()?;
+        self.lexer.seek(pos)?;
+        Ok(())
+    }
+
+    fn leave_copy(&mut self) -> Result<()> {
+        self.lexer.seek(self.copy_pos)?;
+        self.copy_pos = 0;
+        Ok(())
     }
 }
 

@@ -76,6 +76,7 @@ pub enum Tag {
     Refn,
     Refp(u64),
     Alias(u64),
+    Copy(u64),
     Array(u64),
     ArrayRef(u8),
     Hash(u64),
@@ -137,7 +138,7 @@ impl<R: io::Read + io::Seek> Lexer<R> {
             OBJECTV => Tag::ObjectV(self.read_varint()?),
 
             ALIAS => Tag::Alias(self.read_varint()?),
-            COPY => self.read_copy()?,
+            COPY => Tag::Copy(self.read_varint()?),
             WEAKEN => Tag::Weaken,
             REGEXP => Tag::Regexp,
 
@@ -212,13 +213,12 @@ impl<R> Lexer<R> where R: io::Read + io::Seek {
         Ok(buf)
     }
 
-    fn read_copy(&mut self) -> Result<Tag> {
-        let offset = self.read_varint()?;
-        let current = self.input.seek(io::SeekFrom::Current(0))?;
-        self.input.seek(io::SeekFrom::Start(offset))?;
-        let token = self.next()?;
-        self.input.seek(io::SeekFrom::Start(current))?;
-        Ok(token.tag)
+    pub fn tell(&mut self) -> Result<u64> {
+        Ok(self.input.seek(io::SeekFrom::Current(0))? + 1)
+    }
+
+    pub fn seek(&mut self, pos: u64) -> Result<u64> {
+        Ok(self.input.seek(io::SeekFrom::Start(pos - 1))?)
     }
 }
 

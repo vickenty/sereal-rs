@@ -407,4 +407,37 @@ mod test {
 
         assert_eq!(parsed, value);
     }
+
+    #[test]
+    fn test_copy() {
+        let parsed = parse(b"\x2f\x01");
+        assert!(parsed.unwrap_err().is_invalid_copy());
+
+        let parsed = parse(b"\x42\x01\x2f\x01");
+        assert!(parsed.unwrap_err().is_invalid_copy());
+
+        let parsed = parse(b"\x43\x61b\x2f\x02\x51\x2f\x04\x01");
+        assert!(parsed.unwrap_err().is_invalid_copy());
+    }
+
+    #[test]
+    fn test_copy_complex_value() {
+        assert_eq!(p(b"\x43\x41\x01\x2f\x02\x2f\x02"), Ref(Value::new(Array(vec![
+            Value::new(Ref(Value::new(Array(vec![Value::new(U64(1))])))),
+            Value::new(Ref(Value::new(Array(vec![Value::new(U64(1))])))),
+            Value::new(Ref(Value::new(Array(vec![Value::new(U64(1))])))),
+        ]))));
+    }
+
+    #[test]
+    fn test_copy_hash_key() {
+        let mut map = HashMap::new();
+        map.insert(vec![ b'a' ], Value::new(U64(1)));
+
+        assert_eq!(p(b"\x43\x61a\x51\x2f\x02\x01\x2f\x04"), Ref(Value::new(Array(vec![
+            Value::new(String(vec![ b'a' ])),
+            Value::new(Ref(Value::new(Hash(map.clone())))),
+            Value::new(Ref(Value::new(Hash(map.clone())))),
+        ]))));
+    }
 }
