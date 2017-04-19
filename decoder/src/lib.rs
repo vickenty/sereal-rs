@@ -67,11 +67,9 @@ where
     #[allow(unreachable_patterns)]
     let buffer: Vec<u8> = match header.document_type() {
         DocumentType::Uncompressed => {
-            let mut parser = Parser::new(reader, builder, config);
-            return match parser.parse() {
-                Ok(val) => Ok(val),
-                Err(_) => Err(io::Error::new(io::ErrorKind::Other, "")),
-            }
+            let mut buffer = Vec::new();
+            reader.read_to_end(&mut buffer)?;
+            buffer
         },
 
         #[cfg(feature = "comp-snappy")]
