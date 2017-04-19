@@ -97,12 +97,12 @@ pub struct Token {
     pub tag: Tag,
 }
 
-pub struct Lexer<R> {
-    config: Config,
+pub struct Lexer<'a, R> {
+    config: &'a Config,
     input: R,
 }
 
-impl<R: io::Read + io::Seek> Lexer<R> {
+impl<'a, R: io::Read + io::Seek> Lexer<'a, R> {
     pub fn next(&mut self) -> Result<Token> {
         let tag = self.read_tag()?;
         let pos = self.input.seek(io::SeekFrom::Current(0))?;
@@ -121,7 +121,7 @@ impl<R: io::Read + io::Seek> Lexer<R> {
 
             FLOAT => Tag::Float(self.input.read_f32::<LittleEndian>()?),
             DOUBLE => Tag::Double(self.input.read_f64::<LittleEndian>()?),
-            LONG_DOUBLE => unimplemented!(),
+            LONG_DOUBLE => return Err(Error::UnknownTag(tag)),
 
             UNDEF => Tag::Undef,
 
@@ -151,7 +151,8 @@ impl<R: io::Read + io::Seek> Lexer<R> {
             CANONICAL_UNDEF => Tag::CanonicalUndef,
             FALSE => Tag::False,
             TRUE => Tag::True,
-            MANY => unimplemented!(),
+
+            MANY => return Err(Error::UnknownTag(tag)),
             PACKET_START => return Err(Error::UnknownTag(tag)),
             EXTEND => return Err(Error::UnknownTag(tag)),
 
@@ -176,10 +177,8 @@ impl<R: io::Read + io::Seek> Lexer<R> {
             tag: value,
         })
     }
-}
 
-impl<R> Lexer<R> where R: io::Read + io::Seek {
-    pub fn new(r: R, config: Config) -> Lexer<R> {
+    pub fn new(r: R, config: &'a Config) -> Lexer<'a, R> {
         Lexer {
             config: config,
             input: r
@@ -208,6 +207,10 @@ impl<R> Lexer<R> where R: io::Read + io::Seek {
             return Err(Error::StringTooLarge(len));
         }
 
+        if len > usize::max_value() as u64 {
+            return Err(Error::StringTooLarge(len));
+        }
+
         let mut buf = vec![0; len as usize];
         self.input.read_exact(&mut buf)?;
         Ok(buf)
@@ -220,8 +223,4 @@ impl<R> Lexer<R> where R: io::Read + io::Seek {
     pub fn seek(&mut self, pos: u64) -> Result<u64> {
         Ok(self.input.seek(io::SeekFrom::Start(pos - 1))?)
     }
-}
-
-pub fn from_slice(s: &[u8]) -> Lexer<io::Cursor<&[u8]>> {
-    Lexer::new(io::Cursor::new(s), Config::default())
 }

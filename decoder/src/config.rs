@@ -4,6 +4,8 @@ pub struct Config {
     max_string_len: u64,
     max_compressed_size: u64,
     max_uncompressed_size: u64,
+    max_array_size: u64,
+    max_hash_size: u64,
 }
 
 impl Default for Config {
@@ -19,6 +21,8 @@ impl Config {
             max_string_len: 1_000_000,
             max_compressed_size: 100_000_000,
             max_uncompressed_size: 100_000_000,
+            max_array_size: 1_000_000,
+            max_hash_size: 1_000_000,
         }
     }
 
@@ -62,6 +66,28 @@ impl Config {
     pub fn with_max_uncompressed_size(self, new_max: u64) -> Config {
         Config {
             max_uncompressed_size: new_max,
+            ..self
+        }
+    }
+
+    pub fn max_array_size(&self) -> u64 {
+        self.max_array_size
+    }
+
+    pub fn with_max_array_size(self, new_max: u64) -> Config {
+        Config {
+            max_array_size: new_max,
+            ..self
+        }
+    }
+
+    pub fn max_hash_size(&self) -> u64 {
+        self.max_hash_size
+    }
+
+    pub fn with_max_hash_size(self, new_max: u64) -> Config {
+        Config {
+            max_hash_size: new_max,
             ..self
         }
     }

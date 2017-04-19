@@ -139,7 +139,7 @@ where
         ty => return Err(Error::UnsupportedType(ty))
     };
 
-    let mut parser = Parser::new(io::Cursor::new(&buffer), builder, config);
+    let mut parser = Parser::new(io::Cursor::new(&buffer), builder, &config);
     Ok(parser.parse()?)
 }
 

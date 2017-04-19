@@ -12,6 +12,8 @@ pub enum Error {
     InvalidType,
     InvalidRef(u64),
     InvalidCopy,
+    ArrayTooLarge { count: u64, limit: u64 },
+    HashTooLarge { count: u64, limit: u64 },
     LexerError(lexer::Error),
 }
 
@@ -88,17 +90,19 @@ pub trait Builder {
     fn build_hash(&mut self, size: u64) -> Self::HashBuilder;
 }
 
-pub struct Parser<R, B: Builder> {
-    lexer: Lexer<R>,
+pub struct Parser<'a, R, B: Builder> {
+    config: &'a Config,
+    lexer: Lexer<'a, R>,
     track: HashMap<u64, B::Value>,
     builder: B,
     copy_pos: u64,
 }
 
-impl<R: io::Read + io::Seek, B: Builder> Parser<R, B> {
-    pub fn new(reader: R, builder: B, config: Config) -> Parser<R, B> {
+impl<'a, R: io::Read + io::Seek, B: Builder> Parser<'a, R, B> {
+    pub fn new(reader: R, builder: B, config: &'a Config) -> Parser<'a, R, B> {
         Parser {
             lexer: Lexer::new(reader, config),
+            config: config,
             track: HashMap::new(),
             builder: builder,
             copy_pos: 0,
@@ -186,6 +190,10 @@ impl<R: io::Read + io::Seek, B: Builder> Parser<R, B> {
     }
 
     fn parse_array(&mut self, count: u64) -> Result<<B::Value as Value>::Array> {
+        if count > self.config.max_array_size() {
+            return Err(Error::ArrayTooLarge { count: count, limit: self.config.max_array_size() });
+        }
+
         let mut v = self.builder.build_array(count);
         for _ in 0..count {
             let value = self.parse()?;
@@ -195,6 +203,10 @@ impl<R: io::Read + io::Seek, B: Builder> Parser<R, B> {
     }
 
     fn parse_hash(&mut self, count: u64) -> Result<<B::Value as Value>::Hash> {
+        if count > self.config.max_hash_size() {
+            return Err(Error::HashTooLarge { count: count, limit: self.config.max_hash_size() });
+        }
+
         let mut m = self.builder.build_hash(count);
         for _ in 0..count {
             let k = self.parse_str(false)?;
@@ -222,6 +234,7 @@ impl<R: io::Read + io::Seek, B: Builder> Parser<R, B> {
 }
 
 pub fn parse<B: Builder>(s: &[u8], builder: B) -> Result<B::Value> {
-    let mut p = Parser::new(io::Cursor::new(s), builder, Config::default());
+    let config = Config::default();
+    let mut p = Parser::new(io::Cursor::new(s), builder, &config);
     p.parse()
 }
