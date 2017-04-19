@@ -21,11 +21,39 @@ mod varint;
 
 use std::io;
 use std::io::Read;
+
 use config::Config;
 use header::Header;
 use header::DocumentType;
 use parser::Parser;
 use parser::Builder;
+
+#[derive(Debug)]
+pub enum Error {
+    IO(io::Error),
+    Header(header::Error),
+    Parser(parser::Error),
+    BodyTooLarge { size: u64, limit: u64 },
+    UnsupportedType(DocumentType),
+}
+
+impl From<header::Error> for Error {
+    fn from(e: header::Error) -> Error {
+        Error::Header(e)
+    }
+}
+
+impl From<parser::Error> for Error {
+    fn from(e: parser::Error) -> Error {
+        Error::Parser(e)
+    }
+}
+
+impl From<io::Error> for Error {
+    fn from(e: io::Error) -> Error {
+        Error::IO(e)
+    }
+}
 
 #[cfg(feature = "comp-snappy")]
 fn read_snappy_body<R: io::Read>(mut reader: R, comp_size: u64) -> io::Result<Vec<u8>> {
@@ -53,16 +81,13 @@ fn read_zstd_body<R: io::Read>(reader: R, comp_size: u64) -> io::Result<Vec<u8>>
     Ok(buf)
 }
 
-pub fn parse<R, B>(mut reader: R, builder: B) -> io::Result<B::Value>
+pub fn parse<R, B>(mut reader: R, builder: B) -> Result<B::Value, Error>
 where
     R: io::Read + io::Seek,
     B: Builder,
 {
     let config = Config::default();
-    let header = match Header::read(&mut reader, &config) {
-        Ok(header) => header,
-        Err(_) => return Err(io::Error::new(io::ErrorKind::Other, "")),
-    };
+    let header = Header::read(&mut reader, &config)?;
 
     #[allow(unreachable_patterns)]
     let buffer: Vec<u8> = match header.document_type() {
@@ -75,7 +100,10 @@ where
         #[cfg(feature = "comp-snappy")]
         DocumentType::Snappy { compressed_size } => {
             if compressed_size > config.max_compressed_size() {
-                return Err(io::Error::new(io::ErrorKind::Other, ""));
+                return Err(Error::BodyTooLarge {
+                    size: compressed_size,
+                    limit: config.max_compressed_size(),
+                });
             }
             read_snappy_body(reader, compressed_size)?
         },
@@ -83,11 +111,17 @@ where
         #[cfg(feature = "comp-zlib")]
         DocumentType::ZLib { compressed_size, uncompressed_size } => {
             if compressed_size > config.max_compressed_size() {
-                return Err(io::Error::new(io::ErrorKind::Other, ""));
+                return Err(Error::BodyTooLarge {
+                    size: compressed_size,
+                    limit: config.max_compressed_size(),
+                });
             }
 
             if uncompressed_size > config.max_uncompressed_size() {
-                return Err(io::Error::new(io::ErrorKind::Other, ""));
+                return Err(Error::BodyTooLarge {
+                    size: uncompressed_size,
+                    limit: config.max_uncompressed_size(),
+                });
             }
 
             read_zlib_body(reader, compressed_size, uncompressed_size)?
@@ -96,20 +130,17 @@ where
         #[cfg(feature = "comp-zstd")]
         DocumentType::ZStd { compressed_size } => {
             if compressed_size > config.max_compressed_size() {
-                return Err(io::Error::new(io::ErrorKind::Other, ""));
+                return Err(Error::BodyTooLarge { size: compressed_size, limit: config.max_compressed_size() });
             }
 
             read_zstd_body(reader, compressed_size)?
         },
 
-        _ => return Err(io::Error::new(io::ErrorKind::Other, "")),
+        ty => return Err(Error::UnsupportedType(ty))
     };
 
     let mut parser = Parser::new(io::Cursor::new(&buffer), builder, config);
-    match parser.parse() {
-        Ok(val) => Ok(val),
-        Err(_) => Err(io::Error::new(io::ErrorKind::Other, "")),
-    }
+    Ok(parser.parse()?)
 }
 
 #[cfg(test)]
