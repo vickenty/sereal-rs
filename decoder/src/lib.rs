@@ -1,6 +1,11 @@
 extern crate byteorder;
 extern crate typed_arena;
 extern crate sereal_common;
+extern crate serde;
+
+#[cfg(test)]
+#[macro_use]
+extern crate serde_derive;
 
 #[cfg(feature = "comp-snappy")]
 extern crate snap;
@@ -16,6 +21,7 @@ pub mod parser;
 
 pub mod arc;
 pub mod arena;
+pub mod de;
 
 mod varint;
 
