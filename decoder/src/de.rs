@@ -72,22 +72,22 @@ impl From<lexer::Error> for Error {
 //#[derive(Copy, Clone, Debug, PartialEq)]
 //struct Value<'a>(&'a RefCell<Inner<'a>>);
 
-pub struct Deserializer<'a, R> {
-    lexer: Lexer<'a, R>,
+pub struct Deserializer<'cfg, R> {
+    lexer: Lexer<'cfg, R>,
 }
 
-impl<'a, R: io::Read + io::Seek> Deserializer<'a, R> {
-    pub fn new(reader: R, config: &'a Config) -> Self {
+impl<'cfg, R: io::Read + io::Seek> Deserializer<'cfg, R> {
+    pub fn new(reader: R, config: &'cfg Config) -> Self {
         Deserializer {
             lexer: Lexer::new(reader, config),
         }
     }
 }
 
-impl<'a, 'b, R: io::Read + io::Seek> de::Deserializer for &'b mut Deserializer<'a, R> {
+impl<'cfg, 'a, 'de, R: io::Read + io::Seek> de::Deserializer<'de> for &'a mut Deserializer<'cfg, R> {
     type Error = Error;
 
-    fn deserialize<V: de::Visitor>(mut self, visitor: V) -> Result<V::Value, Error> {
+    fn deserialize_any<V: de::Visitor<'de>>(mut self, visitor: V) -> Result<V::Value, Error> {
         let token = self.lexer.next()?;
 
         match token.tag {
@@ -99,109 +99,106 @@ impl<'a, 'b, R: io::Read + io::Seek> de::Deserializer for &'b mut Deserializer<'
             Tag::Str(v) => visitor.visit_byte_buf(v),
             Tag::Array(v) => visitor.visit_seq(Seq::new(self, v)),
             Tag::ArrayRef(v) => visitor.visit_seq(Seq::new(self, v as u64)),
-            Tag::Refn => self.deserialize(visitor),
+            Tag::Refn => self.deserialize_any(visitor),
             Tag::Hash(v) => visitor.visit_map(Map::new(self, v)),
             Tag::HashRef(v) => visitor.visit_map(Map::new(self, v as u64)),
             _ => unimplemented!(),
         }
     }
 
-    fn deserialize_bool<V: de::Visitor>(self, v: V) -> Result<V::Value, Error> {
-        self.deserialize(v)
+    fn deserialize_bool<V: de::Visitor<'de>>(self, v: V) -> Result<V::Value, Error> {
+        self.deserialize_any(v)
     }
-    fn deserialize_u8<V: de::Visitor>(self, v: V) -> Result<V::Value, Error> {
-        self.deserialize(v)
+    fn deserialize_u8<V: de::Visitor<'de>>(self, v: V) -> Result<V::Value, Error> {
+        self.deserialize_any(v)
     }
-    fn deserialize_u16<V: de::Visitor>(self, v: V) -> Result<V::Value, Error> {
-        self.deserialize(v)
+    fn deserialize_u16<V: de::Visitor<'de>>(self, v: V) -> Result<V::Value, Error> {
+        self.deserialize_any(v)
     }
-    fn deserialize_u32<V: de::Visitor>(self, v: V) -> Result<V::Value, Error> {
-        self.deserialize(v)
+    fn deserialize_u32<V: de::Visitor<'de>>(self, v: V) -> Result<V::Value, Error> {
+        self.deserialize_any(v)
     }
-    fn deserialize_u64<V: de::Visitor>(self, v: V) -> Result<V::Value, Error> {
-        self.deserialize(v)
+    fn deserialize_u64<V: de::Visitor<'de>>(self, v: V) -> Result<V::Value, Error> {
+        self.deserialize_any(v)
     }
-    fn deserialize_i8<V: de::Visitor>(self, v: V) -> Result<V::Value, Error> {
-        self.deserialize(v)
+    fn deserialize_i8<V: de::Visitor<'de>>(self, v: V) -> Result<V::Value, Error> {
+        self.deserialize_any(v)
     }
-    fn deserialize_i16<V: de::Visitor>(self, v: V) -> Result<V::Value, Error> {
-        self.deserialize(v)
+    fn deserialize_i16<V: de::Visitor<'de>>(self, v: V) -> Result<V::Value, Error> {
+        self.deserialize_any(v)
     }
-    fn deserialize_i32<V: de::Visitor>(self, v: V) -> Result<V::Value, Error> {
-        self.deserialize(v)
+    fn deserialize_i32<V: de::Visitor<'de>>(self, v: V) -> Result<V::Value, Error> {
+        self.deserialize_any(v)
     }
-    fn deserialize_i64<V: de::Visitor>(self, v: V) -> Result<V::Value, Error> {
-        self.deserialize(v)
+    fn deserialize_i64<V: de::Visitor<'de>>(self, v: V) -> Result<V::Value, Error> {
+        self.deserialize_any(v)
     }
-    fn deserialize_f32<V: de::Visitor>(self, v: V) -> Result<V::Value, Error> {
-        self.deserialize(v)
+    fn deserialize_f32<V: de::Visitor<'de>>(self, v: V) -> Result<V::Value, Error> {
+        self.deserialize_any(v)
     }
-    fn deserialize_f64<V: de::Visitor>(self, v: V) -> Result<V::Value, Error> {
-        self.deserialize(v)
+    fn deserialize_f64<V: de::Visitor<'de>>(self, v: V) -> Result<V::Value, Error> {
+        self.deserialize_any(v)
     }
-    fn deserialize_char<V: de::Visitor>(self, v: V) -> Result<V::Value, Error> {
-        self.deserialize(v)
+    fn deserialize_char<V: de::Visitor<'de>>(self, v: V) -> Result<V::Value, Error> {
+        self.deserialize_any(v)
     }
-    fn deserialize_str<V: de::Visitor>(self, v: V) -> Result<V::Value, Error> {
-        self.deserialize(v)
+    fn deserialize_str<V: de::Visitor<'de>>(self, v: V) -> Result<V::Value, Error> {
+        self.deserialize_any(v)
     }
-    fn deserialize_string<V: de::Visitor>(self, v: V) -> Result<V::Value, Error> {
-        self.deserialize(v)
+    fn deserialize_string<V: de::Visitor<'de>>(self, v: V) -> Result<V::Value, Error> {
+        self.deserialize_any(v)
     }
-    fn deserialize_bytes<V: de::Visitor>(self, v: V) -> Result<V::Value, Error> {
-        self.deserialize(v)
+    fn deserialize_bytes<V: de::Visitor<'de>>(self, v: V) -> Result<V::Value, Error> {
+        self.deserialize_any(v)
     }
-    fn deserialize_byte_buf<V: de::Visitor>(self, v: V) -> Result<V::Value, Error> {
-        self.deserialize(v)
+    fn deserialize_byte_buf<V: de::Visitor<'de>>(self, v: V) -> Result<V::Value, Error> {
+        self.deserialize_any(v)
     }
-    fn deserialize_option<V: de::Visitor>(self, v: V) -> Result<V::Value, Error> {
-        self.deserialize(v)
+    fn deserialize_option<V: de::Visitor<'de>>(self, v: V) -> Result<V::Value, Error> {
+        self.deserialize_any(v)
     }
-    fn deserialize_unit<V: de::Visitor>(self, v: V) -> Result<V::Value, Error> {
-        self.deserialize(v)
+    fn deserialize_unit<V: de::Visitor<'de>>(self, v: V) -> Result<V::Value, Error> {
+        self.deserialize_any(v)
     }
-    fn deserialize_unit_struct<V: de::Visitor>(self, _: &'static str, v: V) -> Result<V::Value, Error> {
-        self.deserialize(v)
+    fn deserialize_unit_struct<V: de::Visitor<'de>>(self, _: &'static str, v: V) -> Result<V::Value, Error> {
+        self.deserialize_any(v)
     }
-    fn deserialize_newtype_struct<V: de::Visitor>(self, _: &'static str, v: V) -> Result<V::Value, Error> {
-        self.deserialize(v)
+    fn deserialize_newtype_struct<V: de::Visitor<'de>>(self, _: &'static str, v: V) -> Result<V::Value, Error> {
+        self.deserialize_any(v)
     }
-    fn deserialize_seq<V: de::Visitor>(self, v: V) -> Result<V::Value, Error> {
-        self.deserialize(v)
+    fn deserialize_seq<V: de::Visitor<'de>>(self, v: V) -> Result<V::Value, Error> {
+        self.deserialize_any(v)
     }
-    fn deserialize_seq_fixed_size<V: de::Visitor>(self, _: usize, v: V) -> Result<V::Value, Error> {
-        self.deserialize(v)
+    fn deserialize_tuple<V: de::Visitor<'de>>(self, _: usize, v: V) -> Result<V::Value, Error> {
+        self.deserialize_any(v)
     }
-    fn deserialize_tuple<V: de::Visitor>(self, _: usize, v: V) -> Result<V::Value, Error> {
-        self.deserialize(v)
+    fn deserialize_tuple_struct<V: de::Visitor<'de>>(self, _: &'static str, _: usize, v: V) -> Result<V::Value, Error> {
+        self.deserialize_any(v)
     }
-    fn deserialize_tuple_struct<V: de::Visitor>(self, _: &'static str, _: usize, v: V) -> Result<V::Value, Error> {
-        self.deserialize(v)
+    fn deserialize_map<V: de::Visitor<'de>>(self, v: V) -> Result<V::Value, Error> {
+        self.deserialize_any(v)
     }
-    fn deserialize_map<V: de::Visitor>(self, v: V) -> Result<V::Value, Error> {
-        self.deserialize(v)
+    fn deserialize_struct<V: de::Visitor<'de>>(self, _: &'static str, _: &'static [&'static str], v: V) -> Result<V::Value, Error> {
+        self.deserialize_any(v)
     }
-    fn deserialize_struct<V: de::Visitor>(self, _: &'static str, _: &'static [&'static str], v: V) -> Result<V::Value, Error> {
-        self.deserialize(v)
+    fn deserialize_enum<V: de::Visitor<'de>>(self, _: &'static str, _: &'static [&'static str], v: V) -> Result<V::Value, Error> {
+        self.deserialize_any(v)
     }
-    fn deserialize_struct_field<V: de::Visitor>(self, v: V) -> Result<V::Value, Error> {
-        self.deserialize(v)
+    fn deserialize_identifier<V: de::Visitor<'de>>(self, v: V) -> Result<V::Value, Error> {
+        self.deserialize_any(v)
     }
-    fn deserialize_enum<V: de::Visitor>(self, _: &'static str, _: &'static [&'static str], v: V) -> Result<V::Value, Error> {
-        self.deserialize(v)
-    }
-    fn deserialize_ignored_any<V: de::Visitor>(self, v: V) -> Result<V::Value, Error> {
-        self.deserialize(v)
+    fn deserialize_ignored_any<V: de::Visitor<'de>>(self, v: V) -> Result<V::Value, Error> {
+        self.deserialize_any(v)
     }
 }
 
-struct Seq<'b, 'a: 'b, R: 'b> {
-    de: &'b mut Deserializer<'a, R>,
+struct Seq<'a, 'cfg: 'a, R: 'a> {
+    de: &'a mut Deserializer<'cfg, R>,
     count: u64,
 }
 
-impl<'de, 'a, R> Seq<'de, 'a, R> {
-    fn new(de: &'de mut Deserializer<'a, R>, count: u64) -> Seq<'de, 'a, R> {
+impl<'a, 'cfg, R> Seq<'a, 'cfg, R> {
+    fn new(de: &'a mut Deserializer<'cfg, R>, count: u64) -> Seq<'a, 'cfg, R> {
         Seq {
             de: de,
             count: count,
@@ -209,10 +206,10 @@ impl<'de, 'a, R> Seq<'de, 'a, R> {
     }
 }
 
-impl<'de, 'a, R: io::Read + io::Seek> de::SeqVisitor for Seq<'de, 'a, R> {
+impl<'de, 'a, 'cfg, R: io::Read + io::Seek> de::SeqAccess<'de> for Seq<'a, 'cfg, R> {
     type Error = Error;
 
-    fn visit_seed<T: de::DeserializeSeed>(&mut self, seed: T) -> Result<Option<T::Value>, Error> {
+    fn next_element_seed<T: de::DeserializeSeed<'de>>(&mut self, seed: T) -> Result<Option<T::Value>, Error> {
         if self.count == 0 {
             return Ok(None);
         }
@@ -223,13 +220,13 @@ impl<'de, 'a, R: io::Read + io::Seek> de::SeqVisitor for Seq<'de, 'a, R> {
     }
 }
 
-struct Map<'b, 'a: 'b, R: 'b> {
-    de: &'b mut Deserializer<'a, R>,
+struct Map<'a, 'cfg: 'a, R: 'a> {
+    de: &'a mut Deserializer<'cfg, R>,
     count: u64,
 }
 
-impl<'b, 'a, R> Map<'b, 'a, R> {
-    fn new(de: &'b mut Deserializer<'a, R>, count: u64) -> Map<'b, 'a, R> {
+impl<'a, 'cfg, R> Map<'a, 'cfg, R> {
+    fn new(de: &'a mut Deserializer<'cfg, R>, count: u64) -> Map<'a, 'cfg, R> {
         Map {
             de: de,
             count: count,
@@ -237,10 +234,10 @@ impl<'b, 'a, R> Map<'b, 'a, R> {
     }
 }
 
-impl<'b, 'a, R: io::Read + io::Seek> de::MapVisitor for Map<'b, 'a, R> {
+impl<'de, 'a, 'cfg, R: io::Read + io::Seek> de::MapAccess<'de> for Map<'a, 'cfg, R> {
     type Error = Error;
 
-    fn visit_key_seed<T: de::DeserializeSeed>(&mut self, seed: T) -> Result<Option<T::Value>, Error> {
+    fn next_key_seed<T: de::DeserializeSeed<'de>>(&mut self, seed: T) -> Result<Option<T::Value>, Error> {
         if self.count == 0 {
             return Ok(None);
         }
@@ -250,7 +247,7 @@ impl<'b, 'a, R: io::Read + io::Seek> de::MapVisitor for Map<'b, 'a, R> {
         Ok(Some(seed.deserialize(&mut *self.de)?))
     }
 
-    fn visit_value_seed<T: de::DeserializeSeed>(&mut self, seed: T) -> Result<T::Value, Error> {
+    fn next_value_seed<T: de::DeserializeSeed<'de>>(&mut self, seed: T) -> Result<T::Value, Error> {
         Ok(seed.deserialize(&mut *self.de)?)
     }
 }
@@ -269,7 +266,7 @@ mod test {
         fn de(s: &[u8]) -> Self;
     }
 
-    impl<T: Deserialize> De for T {
+    impl<'de, T: Deserialize<'de>> De for T {
         fn de(s: &[u8]) -> T {
             let config = Config::default();
             let mut de = Deserializer::new(Cursor::new(s), &config);
