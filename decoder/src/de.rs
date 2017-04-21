@@ -1,6 +1,7 @@
 use std::io;
 use std::error;
 use std::fmt;
+use std::collections::BTreeSet;
 
 use serde::de;
 
@@ -12,6 +13,15 @@ pub enum Error {
     InvalidRef(u64),
     Custom(String),
     Lexer(lexer::Error),
+}
+
+impl Error {
+    pub fn as_invalid_ref(&self) -> Option<u64> {
+        match self {
+            &Error::InvalidRef(p) => Some(p),
+            _ => None,
+        }
+    }
 }
 
 impl fmt::Display for Error {
@@ -74,12 +84,14 @@ impl From<lexer::Error> for Error {
 
 pub struct Deserializer<'cfg, R> {
     lexer: Lexer<'cfg, R>,
+    seen: BTreeSet<u64>,
 }
 
 impl<'cfg, R: io::Read + io::Seek> Deserializer<'cfg, R> {
     pub fn new(reader: R, config: &'cfg Config) -> Self {
         Deserializer {
             lexer: Lexer::new(reader, config),
+            seen: BTreeSet::new(),
         }
     }
 }
@@ -99,7 +111,25 @@ impl<'cfg, 'a, 'de, R: io::Read + io::Seek> de::Deserializer<'de> for &'a mut De
             Tag::Str(v) => visitor.visit_byte_buf(v),
             Tag::Array(v) => visitor.visit_seq(Seq::new(self, v)),
             Tag::ArrayRef(v) => visitor.visit_seq(Seq::new(self, v as u64)),
-            Tag::Refn => self.deserialize_any(visitor),
+            Tag::Undef => visitor.visit_none(),
+            Tag::Refn => visitor.visit_some(self),
+            Tag::Refp(p) => {
+                let cur = self.lexer.tell()?;
+
+                if self.seen.contains(&p) || p >= cur {
+                    return Err(Error::InvalidRef(p));
+                }
+
+                self.seen.insert(p);
+                self.lexer.seek(p)?;
+
+                let res = visitor.visit_some(&mut *self);
+
+                self.lexer.seek(cur)?;
+                self.seen.remove(&p);
+
+                res
+            }
             Tag::Hash(v) => visitor.visit_map(Map::new(self, v)),
             Tag::HashRef(v) => visitor.visit_map(Map::new(self, v as u64)),
             _ => unimplemented!(),
@@ -256,33 +286,34 @@ impl<'de, 'a, 'cfg, R: io::Read + io::Seek> de::MapAccess<'de> for Map<'a, 'cfg,
 mod test {
     use std::io::Cursor;
     use std::collections::HashMap;
+    use std::fmt::Debug;
 
     use serde::de::Deserialize;
 
     use config::Config;
     use super::Deserializer;
+    use super::Error;
 
-    trait De {
-        fn de(s: &[u8]) -> Self;
-    }
+    trait De: Debug + Sized {
+        fn de_res(s: &[u8]) -> Result<Self, Error>;
 
-    impl<'de, T: Deserialize<'de>> De for T {
-        fn de(s: &[u8]) -> T {
-            let config = Config::default();
-            let mut de = Deserializer::new(Cursor::new(s), &config);
-            T::deserialize(&mut de).unwrap()
+        fn de(s: &[u8]) -> Self {
+            Self::de_res(s).unwrap()
+        }
+
+        fn err(s: &[u8]) -> Error {
+            Self::de_res(s).unwrap_err()
         }
     }
 
-    #[derive(Deserialize, PartialEq, Debug)]
-    struct Tuple(u32, u64, Vec<u8>);
-
-    #[derive(Deserialize, PartialEq, Debug)]
-    struct Named {
-        foo: u32,
-        bar: Vec<u8>,
-        baz: String,
+    impl<'de, T: Debug + Deserialize<'de>> De for T {
+        fn de_res(s: &[u8]) -> Result<T, Error> {
+            let config = Config::default();
+            let mut de = Deserializer::new(Cursor::new(s), &config);
+            T::deserialize(&mut de)
+        }
     }
+
 
     #[test]
     fn deserialize_int() {
@@ -292,7 +323,7 @@ mod test {
     #[test]
     fn deserialize_vec() {
         assert_eq!(Vec::<i32>::de(b"\x43\x01\x02\x03"), vec![1, 2, 3]);
-        assert_eq!(Vec::<u64>::de(b"\x28\x2b\x03\x01\x02\x03"), vec![1, 2, 3]);
+        assert_eq!(Option::<Vec<u64>>::de(b"\x28\x2b\x03\x01\x02\x03"), Some(vec![1, 2, 3]));
     }
 
     #[test]
@@ -306,18 +337,47 @@ mod test {
 
     #[test]
     fn deserialize_tuple() {
+        #[derive(Deserialize, PartialEq, Debug)]
+        struct Tuple(u32, u64, Vec<u8>);
+
         assert_eq!(Tuple::de(b"\x43\x01\x02\x43\x03\x04\x05"), Tuple(1, 2, vec![3, 4, 5]));
     }
 
     #[test]
-    fn deserialize_named() {
+    fn deserialize_struct() {
+        #[derive(Deserialize, PartialEq, Debug)]
+        struct Struct {
+            foo: u32,
+            bar: Vec<u8>,
+            baz: String,
+        }
+
         assert_eq!(
-            Named::de(b"\x53\x63foo\x01\x63bar\x42\x02\x03\x63baz\x62ok"),
-            Named {
+            Struct::de(b"\x53\x63foo\x01\x63bar\x42\x02\x03\x63baz\x62ok"),
+            Struct {
                 foo: 1,
                 bar: vec![2, 3],
                 baz: "ok".to_owned(),
             }
         );
+    }
+
+
+    #[test]
+    fn refs() {
+        #[derive(Deserialize, Debug, PartialEq, Clone)]
+        struct S {
+            f: Option<Box<S>>,
+            g: Option<Box<S>>,
+        };
+
+        let s = Some(Box::new(S { f: None, g: None }));
+
+        assert_eq!(S::de(b"\x50"), S { f: None, g: None });
+        assert_eq!(S::de(b"\x42\x28\x50\x25"), S { f: s.clone(), g: None });
+        assert_eq!(S::de(b"\x42\x28\xd0\x29\x03"), S { f: s.clone(), g: s.clone() });
+        assert_eq!(S::err(b"\x42\x29\x01\x28\x50").as_invalid_ref(), Some(1));
+        assert_eq!(S::err(b"\x42\x28\x50\x29\x01").as_invalid_ref(), Some(1));
+
     }
 }
