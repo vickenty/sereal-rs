@@ -6,7 +6,8 @@ use std::collections::BTreeSet;
 use serde::de;
 
 use lexer;
-use lexer::{ Lexer, Tag };
+use lexer::Lexer;
+use lexer::Tag;
 use config::Config;
 
 pub enum Error {
@@ -61,26 +62,6 @@ impl From<lexer::Error> for Error {
         Error::Lexer(e)
     }
 }
-
-//#[derive(Clone, Debug, PartialEq)]
-//enum Inner<'a> {
-//    Undef,
-//    I64(i64),
-//    U64(u64),
-//    F32(f32),
-//    F64(f64),
-//    String(Vec<u8>),
-//    Ref(Value<'a>),
-//    WeakRef(Value<'a>),
-//    Array(Vec<Value<'a>>),
-//    Hash(Vec<(Value<'a>, Value<'a>)>),
-//    Object(Value<'a>, Value<'a>),
-//    Bool(bool),
-//    Regexp(Value<'a>, Value<'a>),
-//}
-//
-//#[derive(Copy, Clone, Debug, PartialEq)]
-//struct Value<'a>(&'a RefCell<Inner<'a>>);
 
 pub struct Deserializer<'cfg, R> {
     lexer: Lexer<'cfg, R>,
@@ -314,20 +295,19 @@ mod test {
         }
     }
 
-
     #[test]
-    fn deserialize_int() {
+    fn ints() {
         assert_eq!(u64::de(b"\x01"), 1);
     }
 
     #[test]
-    fn deserialize_vec() {
+    fn vecs() {
         assert_eq!(Vec::<i32>::de(b"\x43\x01\x02\x03"), vec![1, 2, 3]);
         assert_eq!(Option::<Vec<u64>>::de(b"\x28\x2b\x03\x01\x02\x03"), Some(vec![1, 2, 3]));
     }
 
     #[test]
-    fn deserialize_map() {
+    fn hashmaps() {
         let mut map = HashMap::new();
         map.insert(1, 2);
         map.insert(3, 4);
@@ -336,32 +316,31 @@ mod test {
     }
 
     #[test]
-    fn deserialize_tuple() {
+    fn tuples() {
         #[derive(Deserialize, PartialEq, Debug)]
-        struct Tuple(u32, u64, Vec<u8>);
+        struct S(u32, u64, Vec<u8>);
 
-        assert_eq!(Tuple::de(b"\x43\x01\x02\x43\x03\x04\x05"), Tuple(1, 2, vec![3, 4, 5]));
+        assert_eq!(S::de(b"\x43\x01\x02\x43\x03\x04\x05"), S(1, 2, vec![3, 4, 5]));
     }
 
     #[test]
-    fn deserialize_struct() {
+    fn structs() {
         #[derive(Deserialize, PartialEq, Debug)]
-        struct Struct {
+        struct S {
             foo: u32,
             bar: Vec<u8>,
             baz: String,
         }
 
         assert_eq!(
-            Struct::de(b"\x53\x63foo\x01\x63bar\x42\x02\x03\x63baz\x62ok"),
-            Struct {
+            S::de(b"\x53\x63foo\x01\x63bar\x42\x02\x03\x63baz\x62ok"),
+            S {
                 foo: 1,
                 bar: vec![2, 3],
                 baz: "ok".to_owned(),
             }
         );
     }
-
 
     #[test]
     fn refs() {
@@ -378,6 +357,5 @@ mod test {
         assert_eq!(S::de(b"\x42\x28\xd0\x29\x03"), S { f: s.clone(), g: s.clone() });
         assert_eq!(S::err(b"\x42\x29\x01\x28\x50").as_invalid_ref(), Some(1));
         assert_eq!(S::err(b"\x42\x28\x50\x29\x01").as_invalid_ref(), Some(1));
-
     }
 }
