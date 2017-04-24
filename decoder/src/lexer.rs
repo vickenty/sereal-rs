@@ -1,7 +1,7 @@
 use std::io;
 use std::result;
 
-use byteorder::{ LittleEndian, ReadBytesExt };
+use byteorder::{ LittleEndian, ByteOrder };
 use sereal_common::constants::*;
 
 use varint;
@@ -12,6 +12,7 @@ use config::Config;
 #[derive(Debug)]
 pub enum Error {
     IOError(io::Error),
+    UnexpectedEof,
     VarintOverflow,
     StringTooLarge(u64),
     UnknownTag(u8),
@@ -20,6 +21,7 @@ pub enum Error {
 impl Error {
     pub fn is_eof(&self) -> bool {
         match *self {
+            Error::UnexpectedEof => true,
             Error::IOError(ref e) => e.kind() == io::ErrorKind::UnexpectedEof,
             _ => false,
         }
@@ -62,7 +64,7 @@ impl From<varint::Error> for Error {
 pub type Result<T> = result::Result<T, Error>;
 
 #[derive(Debug)]
-pub enum Tag {
+pub enum Tag<'a> {
     Undef,
     CanonicalUndef,
     True,
@@ -81,8 +83,8 @@ pub enum Tag {
     ArrayRef(u8),
     Hash(u64),
     HashRef(u8),
-    Bin(Vec<u8>),
-    Str(Vec<u8>),
+    Bin(&'a [u8]),
+    Str(&'a [u8]),
     Object,
     ObjectV(u64),
     ObjectFreeze,
@@ -91,21 +93,22 @@ pub enum Tag {
     Regexp,
 }
 
-pub struct Token {
+pub struct Token<'a> {
     pub pos: u64,
     pub track: bool,
-    pub tag: Tag,
+    pub tag: Tag<'a>,
 }
 
-pub struct Lexer<'a, R> {
+pub struct Lexer<'a, 'b> {
     config: &'a Config,
-    input: R,
+    input: &'b [u8],
+    pos: usize,
 }
 
-impl<'a, R: io::Read + io::Seek> Lexer<'a, R> {
-    pub fn next(&mut self) -> Result<Token> {
+impl<'a, 'b> Lexer<'a, 'b> {
+    pub fn next(&mut self) -> Result<Token<'b>> {
         let tag = self.read_tag()?;
-        let pos = self.input.seek(io::SeekFrom::Current(0))?;
+        let pos = self.pos as u64;
         let trk = tag & TRACK_BIT == TRACK_BIT;
         let tag = tag & TYPE_MASK;
 
@@ -119,8 +122,8 @@ impl<'a, R: io::Read + io::Seek> Lexer<'a, R> {
             VARINT => Tag::Varint(self.read_varint()?),
             ZIGZAG => Tag::Zigzag(self.read_zigzag()?),
 
-            FLOAT => Tag::Float(self.input.read_f32::<LittleEndian>()?),
-            DOUBLE => Tag::Double(self.input.read_f64::<LittleEndian>()?),
+            FLOAT => Tag::Float(self.read_f32()?),
+            DOUBLE => Tag::Double(self.read_f64()?),
             LONG_DOUBLE => return Err(Error::UnknownTag(tag)),
 
             UNDEF => Tag::Undef,
@@ -164,7 +167,7 @@ impl<'a, R: io::Read + io::Seek> Lexer<'a, R> {
             HASHREF_0...
             HASHREF_15 => Tag::HashRef(tag - HASHREF_0),
 
-            SHORT_BINARY_0 => Tag::Bin(Vec::new()),
+            SHORT_BINARY_0 => Tag::Bin(&[]),
             SHORT_BINARY_1...
             SHORT_BINARY_31 => Tag::Bin(self.read_bytes((tag - SHORT_BINARY_0) as u64)?),
 
@@ -178,31 +181,66 @@ impl<'a, R: io::Read + io::Seek> Lexer<'a, R> {
         })
     }
 
-    pub fn new(r: R, config: &'a Config) -> Lexer<'a, R> {
+    pub fn new(config: &'a Config, input: &'b [u8]) -> Lexer<'a, 'b> {
         Lexer {
             config: config,
-            input: r
+            input: input,
+            pos: 0,
+        }
+    }
+
+    fn next_byte(&mut self) -> Result<u8> {
+        if self.pos < self.input.len() {
+            let b = self.input[self.pos];
+            self.pos += 1;
+            Ok(b)
+        } else {
+            Err(Error::UnexpectedEof)
         }
     }
 
     fn read_tag(&mut self) -> Result<u8> {
         loop {
-            let tag = self.input.read_u8()?;
+            let tag = self.next_byte()?;
             if tag & TYPE_MASK != PAD {
                 return Ok(tag);
             }
         }
     }
 
+    fn read_f32(&mut self) -> Result<f32> {
+        let buf = &self.input[self.pos..];
+        if buf.len() < 4 {
+            return Err(Error::UnexpectedEof);
+        }
+        self.pos += 4;
+        Ok(LittleEndian::read_f32(buf))
+    }
+
+    fn read_f64(&mut self) -> Result<f64> {
+        let buf = &self.input[self.pos..];
+        if buf.len() < 8 {
+            return Err(Error::UnexpectedEof);
+        }
+        self.pos += 8;
+        Ok(LittleEndian::read_f64(buf))
+    }
+
     fn read_varint(&mut self) -> Result<u64> {
-        Ok(self.input.read_varint()?)
+        let mut cursor = io::Cursor::new(&self.input[self.pos..]);
+        let val = cursor.read_varint()?;
+        self.pos += cursor.position() as usize;
+        Ok(val)
     }
 
     fn read_zigzag(&mut self) -> Result<i64> {
-        Ok(self.input.read_zigzag()?)
+        let mut cursor = io::Cursor::new(&self.input[self.pos..]);
+        let val = cursor.read_zigzag()?;
+        self.pos += cursor.position() as usize;
+        Ok(val)
     }
 
-    fn read_bytes(&mut self, len: u64) -> Result<Vec<u8>> {
+    fn read_bytes(&mut self, len: u64) -> Result<&'b [u8]> {
         if len > self.config.max_string_len() {
             return Err(Error::StringTooLarge(len));
         }
@@ -211,16 +249,24 @@ impl<'a, R: io::Read + io::Seek> Lexer<'a, R> {
             return Err(Error::StringTooLarge(len));
         }
 
-        let mut buf = vec![0; len as usize];
-        self.input.read_exact(&mut buf)?;
-        Ok(buf)
+        let a = self.pos;
+        self.pos += len as usize;
+
+        if self.pos > self.input.len() {
+            return Err(Error::UnexpectedEof);
+        }
+
+
+
+        Ok(&self.input[a..self.pos])
     }
 
     pub fn tell(&mut self) -> Result<u64> {
-        Ok(self.input.seek(io::SeekFrom::Current(0))? + 1)
+        Ok((self.pos + 1) as u64)
     }
 
-    pub fn seek(&mut self, pos: u64) -> Result<u64> {
-        Ok(self.input.seek(io::SeekFrom::Start(pos - 1))?)
+    pub fn seek(&mut self, pos: u64) -> Result<()> {
+        self.pos = (pos - 1) as usize;
+        Ok(())
     }
 }

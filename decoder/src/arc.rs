@@ -440,4 +440,13 @@ mod test {
             Value::new(Ref(Value::new(Hash(map.clone())))),
         ]))));
     }
+
+    #[test]
+    fn test_f32() {
+        assert_eq!(p(b"\x2b\x03\x22\x00\x00\x00\x00\x2f\x03\x63foo"), Array(vec![
+            Value::new(F32(0.0)),
+            Value::new(F32(0.0)),
+            Value::new(String(b"foo".to_vec())),
+        ]));
+    }
 }

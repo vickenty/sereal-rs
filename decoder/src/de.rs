@@ -1,4 +1,3 @@
-use std::io;
 use std::error;
 use std::fmt;
 use std::collections::BTreeSet;
@@ -63,21 +62,21 @@ impl From<lexer::Error> for Error {
     }
 }
 
-pub struct Deserializer<'cfg, R> {
-    lexer: Lexer<'cfg, R>,
+pub struct Deserializer<'cfg, 'b> {
+    lexer: Lexer<'cfg, 'b>,
     seen: BTreeSet<u64>,
 }
 
-impl<'cfg, R: io::Read + io::Seek> Deserializer<'cfg, R> {
-    pub fn new(reader: R, config: &'cfg Config) -> Self {
+impl<'cfg, 'b> Deserializer<'cfg, 'b> {
+    pub fn new(config: &'cfg Config, input: &'b [u8]) -> Self {
         Deserializer {
-            lexer: Lexer::new(reader, config),
+            lexer: Lexer::new(config, input),
             seen: BTreeSet::new(),
         }
     }
 }
 
-impl<'cfg, 'a, 'de, R: io::Read + io::Seek> de::Deserializer<'de> for &'a mut Deserializer<'cfg, R> {
+impl<'cfg, 'a, 'de> de::Deserializer<'de> for &'a mut Deserializer<'cfg, 'de> {
     type Error = Error;
 
     fn deserialize_any<V: de::Visitor<'de>>(mut self, visitor: V) -> Result<V::Value, Error> {
@@ -88,8 +87,8 @@ impl<'cfg, 'a, 'de, R: io::Read + io::Seek> de::Deserializer<'de> for &'a mut De
             Tag::Neg(v) => visitor.visit_i8(v),
             Tag::Float(v) => visitor.visit_f32(v),
             Tag::Double(v) => visitor.visit_f64(v),
-            Tag::Bin(v) => visitor.visit_byte_buf(v),
-            Tag::Str(v) => visitor.visit_byte_buf(v),
+            Tag::Bin(v) => visitor.visit_borrowed_bytes(v),
+            Tag::Str(v) => visitor.visit_borrowed_bytes(v),
             Tag::Array(v) => visitor.visit_seq(Seq::new(self, v)),
             Tag::ArrayRef(v) => visitor.visit_seq(Seq::new(self, v as u64)),
             Tag::Undef => visitor.visit_none(),
@@ -203,13 +202,13 @@ impl<'cfg, 'a, 'de, R: io::Read + io::Seek> de::Deserializer<'de> for &'a mut De
     }
 }
 
-struct Seq<'a, 'cfg: 'a, R: 'a> {
-    de: &'a mut Deserializer<'cfg, R>,
+struct Seq<'a, 'cfg: 'a, 'de: 'a> {
+    de: &'a mut Deserializer<'cfg, 'de>,
     count: u64,
 }
 
-impl<'a, 'cfg, R> Seq<'a, 'cfg, R> {
-    fn new(de: &'a mut Deserializer<'cfg, R>, count: u64) -> Seq<'a, 'cfg, R> {
+impl<'a, 'cfg, 'de> Seq<'a, 'cfg, 'de> {
+    fn new(de: &'a mut Deserializer<'cfg, 'de>, count: u64) -> Seq<'a, 'cfg, 'de> {
         Seq {
             de: de,
             count: count,
@@ -217,7 +216,7 @@ impl<'a, 'cfg, R> Seq<'a, 'cfg, R> {
     }
 }
 
-impl<'de, 'a, 'cfg, R: io::Read + io::Seek> de::SeqAccess<'de> for Seq<'a, 'cfg, R> {
+impl<'de, 'a, 'cfg> de::SeqAccess<'de> for Seq<'a, 'cfg, 'de> {
     type Error = Error;
 
     fn next_element_seed<T: de::DeserializeSeed<'de>>(&mut self, seed: T) -> Result<Option<T::Value>, Error> {
@@ -231,13 +230,13 @@ impl<'de, 'a, 'cfg, R: io::Read + io::Seek> de::SeqAccess<'de> for Seq<'a, 'cfg,
     }
 }
 
-struct Map<'a, 'cfg: 'a, R: 'a> {
-    de: &'a mut Deserializer<'cfg, R>,
+struct Map<'a, 'cfg: 'a, 'de: 'a> {
+    de: &'a mut Deserializer<'cfg, 'de>,
     count: u64,
 }
 
-impl<'a, 'cfg, R> Map<'a, 'cfg, R> {
-    fn new(de: &'a mut Deserializer<'cfg, R>, count: u64) -> Map<'a, 'cfg, R> {
+impl<'a, 'cfg, 'de> Map<'a, 'cfg, 'de> {
+    fn new(de: &'a mut Deserializer<'cfg, 'de>, count: u64) -> Map<'a, 'cfg, 'de> {
         Map {
             de: de,
             count: count,
@@ -245,7 +244,7 @@ impl<'a, 'cfg, R> Map<'a, 'cfg, R> {
     }
 }
 
-impl<'de, 'a, 'cfg, R: io::Read + io::Seek> de::MapAccess<'de> for Map<'a, 'cfg, R> {
+impl<'de, 'a, 'cfg> de::MapAccess<'de> for Map<'a, 'cfg, 'de> {
     type Error = Error;
 
     fn next_key_seed<T: de::DeserializeSeed<'de>>(&mut self, seed: T) -> Result<Option<T::Value>, Error> {
@@ -265,7 +264,6 @@ impl<'de, 'a, 'cfg, R: io::Read + io::Seek> de::MapAccess<'de> for Map<'a, 'cfg,
 
 #[cfg(test)]
 mod test {
-    use std::io::Cursor;
     use std::collections::HashMap;
     use std::fmt::Debug;
 
@@ -275,22 +273,22 @@ mod test {
     use super::Deserializer;
     use super::Error;
 
-    trait De: Debug + Sized {
-        fn de_res(s: &[u8]) -> Result<Self, Error>;
+    trait De<'de>: Debug + Sized {
+        fn de_res(s: &'de [u8]) -> Result<Self, Error>;
 
-        fn de(s: &[u8]) -> Self {
+        fn de(s: &'de [u8]) -> Self {
             Self::de_res(s).unwrap()
         }
 
-        fn err(s: &[u8]) -> Error {
+        fn err(s: &'de [u8]) -> Error {
             Self::de_res(s).unwrap_err()
         }
     }
 
-    impl<'de, T: Debug + Deserialize<'de>> De for T {
-        fn de_res(s: &[u8]) -> Result<T, Error> {
+    impl<'de, T: Debug + Deserialize<'de>> De<'de> for T {
+        fn de_res(s: &'de [u8]) -> Result<T, Error> {
             let config = Config::default();
-            let mut de = Deserializer::new(Cursor::new(s), &config);
+            let mut de = Deserializer::new(&config, s);
             T::deserialize(&mut de)
         }
     }
@@ -357,5 +355,20 @@ mod test {
         assert_eq!(S::de(b"\x42\x28\xd0\x29\x03"), S { f: s.clone(), g: s.clone() });
         assert_eq!(S::err(b"\x42\x29\x01\x28\x50").as_invalid_ref(), Some(1));
         assert_eq!(S::err(b"\x42\x28\x50\x29\x01").as_invalid_ref(), Some(1));
+    }
+
+    #[test]
+    fn borrow_str() {
+        #[derive(Deserialize, Debug, PartialEq, Clone)]
+        struct S<'a> {
+            a: &'a str,
+            b: &'a str,
+            c: &'a str,
+        }
+
+        let d = b"\x43\x63foo\x63bar\x63baz";
+        let s = S::de(&d[..]);
+
+        assert_eq!(s, S { a: "foo", b: "bar", c: "baz" });
     }
 }

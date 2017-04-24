@@ -1,4 +1,3 @@
-use std::io;
 use std::result;
 use std::collections::HashMap;
 
@@ -90,18 +89,18 @@ pub trait Builder {
     fn build_hash(&mut self, size: u64) -> Self::HashBuilder;
 }
 
-pub struct Parser<'a, R, B: Builder> {
+pub struct Parser<'a, 'b, B: Builder> {
     config: &'a Config,
-    lexer: Lexer<'a, R>,
+    lexer: Lexer<'a, 'b>,
     track: HashMap<u64, B::Value>,
     builder: B,
     copy_pos: u64,
 }
 
-impl<'a, R: io::Read + io::Seek, B: Builder> Parser<'a, R, B> {
-    pub fn new(reader: R, builder: B, config: &'a Config) -> Parser<'a, R, B> {
+impl<'a, 'b, B: Builder> Parser<'a, 'b, B> {
+    pub fn new(builder: B, config: &'a Config, input: &'b [u8]) -> Parser<'a, 'b, B> {
         Parser {
-            lexer: Lexer::new(reader, config),
+            lexer: Lexer::new(config, input),
             config: config,
             track: HashMap::new(),
             builder: builder,
@@ -235,6 +234,6 @@ impl<'a, R: io::Read + io::Seek, B: Builder> Parser<'a, R, B> {
 
 pub fn parse<B: Builder>(s: &[u8], builder: B) -> Result<B::Value> {
     let config = Config::default();
-    let mut p = Parser::new(io::Cursor::new(s), builder, &config);
+    let mut p = Parser::new(builder, &config, s);
     p.parse()
 }
