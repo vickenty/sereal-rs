@@ -182,7 +182,7 @@ impl Inner {
     }
 }
 
-impl parser::Value for Value {
+impl<'buf> parser::Value<'buf> for Value {
     type Array = Vec<Value>;
     type Hash = HashMap<Vec<u8>, Value>;
 
@@ -259,7 +259,7 @@ impl parser::Value for Value {
 
 pub struct ArcBuilder;
 
-impl parser::Builder for ArcBuilder {
+impl<'buf> parser::Builder<'buf> for ArcBuilder {
     type Value = Value;
     type ArrayBuilder = Vec<Value>;
     type HashBuilder = HashMap<Vec<u8>, Value>;
@@ -277,7 +277,7 @@ impl parser::Builder for ArcBuilder {
     }
 }
 
-impl parser::ArrayBuilder<Value> for Vec<Value> {
+impl<'buf> parser::ArrayBuilder<'buf, Value> for Vec<Value> {
     fn insert(&mut self, value: Value) -> Result<()> {
         self.push(value);
         Ok(())
@@ -288,7 +288,7 @@ impl parser::ArrayBuilder<Value> for Vec<Value> {
     }
 }
 
-impl parser::HashBuilder<Value> for HashMap<Vec<u8>, Value> {
+impl<'buf> parser::HashBuilder<'buf, Value> for HashMap<Vec<u8>, Value> {
     fn insert(&mut self, key: Value, value: Value) -> Result<()> {
         self.insert(key.to_string()?, value);
         Ok(())

@@ -1,35 +1,52 @@
+use std;
 use std::cell::RefCell;
+use std::ptr;
+use std::mem;
+use std::collections::HashMap;
+
 use typed_arena;
 
 use parser;
 pub use parser::Error;
 pub use parser::Result;
 
-pub type Arena<'a> = typed_arena::Arena<RefCell<Inner<'a>>>;
+pub struct Arena<'a, 'buf: 'a> {
+    values: typed_arena::Arena<RefCell<Inner<'a, 'buf>>>,
+    arrays: typed_arena::Arena<Value<'a, 'buf>>,
+}
+
+impl<'a, 'buf> Arena<'a, 'buf> {
+    pub fn new() -> Self {
+        Arena {
+            values: typed_arena::Arena::new(),
+            arrays: typed_arena::Arena::new(),
+        }
+    }
+}
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum Inner<'a> {
+pub enum Inner<'a, 'buf: 'a> {
     Undef,
     I64(i64),
     U64(u64),
     F32(f32),
     F64(f64),
-    String(Vec<u8>),
-    Ref(Value<'a>),
-    WeakRef(Value<'a>),
-    Array(Vec<Value<'a>>),
-    Hash(Vec<(Value<'a>, Value<'a>)>),
-    Object(Value<'a>, Value<'a>),
+    String(&'buf [u8]),
+    Ref(Value<'a, 'buf>),
+    WeakRef(Value<'a, 'buf>),
+    Array(&'a [Value<'a, 'buf>]),
+    Hash(HashMap<&'a str, Value<'a, 'buf>>),
+    Object(Value<'a, 'buf>, Value<'a, 'buf>),
     Bool(bool),
-    Regexp(Value<'a>, Value<'a>),
+    Regexp(Value<'a, 'buf>, Value<'a, 'buf>),
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]
-pub struct Value<'a>(pub &'a RefCell<Inner<'a>>);
+pub struct Value<'a, 'buf: 'a>(pub &'a RefCell<Inner<'a, 'buf>>);
 
-impl<'a> parser::Value for Value<'a> {
-    type Array = Vec<Value<'a>>;
-    type Hash = Vec<(Value<'a>, Value<'a>)>;
+impl<'a, 'buf> parser::Value<'buf> for Value<'a, 'buf> {
+    type Array = &'a [Value<'a, 'buf>];
+    type Hash = HashMap<&'a str, Value<'a, 'buf>>;
 
     fn set_undef(&mut self) {
         self.set(Inner::Undef);
@@ -79,12 +96,12 @@ impl<'a> parser::Value for Value<'a> {
         self.set(Inner::Hash(h));
     }
 
-    fn set_binary(&mut self, s: &[u8]) {
-        self.set(Inner::String(s.to_owned()));
+    fn set_binary(&mut self, s: &'buf [u8]) {
+        self.set(Inner::String(s));
     }
 
-    fn set_string(&mut self, s: &[u8]) {
-        self.set(Inner::String(s.to_owned()));
+    fn set_string(&mut self, s: &'buf [u8]) {
+        self.set(Inner::String(s));
     }
 
     fn set_object(&mut self, class: Self, value: Self) -> Result<()> {
@@ -102,73 +119,109 @@ impl<'a> parser::Value for Value<'a> {
     }
 }
 
-impl<'a> Value<'a> {
-    fn set(&self, inner: Inner<'a>) {
+impl<'a, 'buf> Value<'a, 'buf> {
+    fn set(&self, inner: Inner<'a, 'buf>) {
         *self.0.borrow_mut() = inner;
     }
 }
 
-pub struct ArenaBuilder<'a> {
-    arena: &'a Arena<'a>,
+pub struct ArenaBuilder<'a, 'buf: 'a> {
+    arena: &'a Arena<'a, 'buf>,
 }
 
-impl<'a> ArenaBuilder<'a> {
-    pub fn new(arena: &'a Arena<'a>) -> ArenaBuilder<'a> {
+impl<'a, 'buf> ArenaBuilder<'a, 'buf> {
+    pub fn new(arena: &'a Arena<'a, 'buf>) -> ArenaBuilder<'a, 'buf> {
         ArenaBuilder { arena: arena }
     }
 }
 
-impl<'a> parser::Builder for ArenaBuilder<'a> {
-    type Value = Value<'a>;
-    type ArrayBuilder = Vec<Value<'a>>;
-    type HashBuilder = Vec<(Value<'a>, Value<'a>)>;
+impl<'a, 'buf> parser::Builder<'buf> for ArenaBuilder<'a, 'buf> {
+    type Value = Value<'a, 'buf>;
+    type ArrayBuilder = ArrayBuilder<'a, 'buf>;
+    type HashBuilder = HashMap<&'a str, Value<'a, 'buf>>;
 
-    fn new(&mut self) -> Value<'a> {
-        Value(self.arena.alloc(RefCell::new(Inner::Undef)))
+    fn new(&mut self) -> Value<'a, 'buf> {
+        Value(self.arena.values.alloc(RefCell::new(Inner::Undef)))
     }
 
-    fn build_array(&mut self, count: u64) -> Vec<Value<'a>> {
-        Vec::with_capacity(count as usize)
+    fn build_array(&mut self, count: u64) -> ArrayBuilder<'a, 'buf> {
+        ArrayBuilder::new(&self.arena.arrays, count)
     }
 
-    fn build_hash(&mut self, count: u64) -> Vec<(Value<'a>, Value<'a>)> {
-        Vec::with_capacity(count as usize)
+    fn build_hash(&mut self, count: u64) -> HashMap<&'a str, Value<'a, 'buf>> {
+        HashMap::with_capacity(count as usize)
     }
 }
 
-impl<'a> parser::ArrayBuilder<Value<'a>> for Vec<Value<'a>> {
-    fn insert(&mut self, v: Value<'a>) -> Result<()> {
-        self.push(v);
+pub struct ArrayBuilder<'a, 'buf: 'a> {
+    base: *mut [Value<'a, 'buf>],
+    next: *mut Value<'a, 'buf>,
+    rest: usize,
+}
+
+impl<'a, 'buf> ArrayBuilder<'a, 'buf> {
+    fn new(arena: &'a typed_arena::Arena<Value<'a, 'buf>>, cap: u64) -> Self {
+        let cap = cap as usize;
+        unsafe {
+            let slice = arena.alloc_uninitialized(cap);
+            let first = &mut (*slice)[0] as *mut _;
+            ArrayBuilder {
+                base: slice,
+                next: first,
+                rest: cap,
+            }
+        }
+    }
+}
+
+impl<'a, 'buf> parser::ArrayBuilder<'buf, Value<'a, 'buf>> for ArrayBuilder<'a, 'buf> {
+    fn insert(&mut self, v: Value<'a, 'buf>) -> Result<()> {
+        assert!(self.rest > 0);
+        self.rest -= 1;
+        unsafe {
+            ptr::write(self.next, v);
+            self.next = self.next.offset(1);
+        }
         Ok(())
     }
 
-    fn finalize(self) -> Vec<Value<'a>> {
+    fn finalize(self) -> &'a [Value<'a, 'buf>] {
+        assert!(self.rest == 0);
+        unsafe { mem::transmute(self.base) }
+    }
+}
+
+impl<'a, 'buf> parser::HashBuilder<'buf, Value<'a, 'buf>> for HashMap<&'a str, Value<'a, 'buf>> {
+    fn insert(&mut self, key: Value<'a, 'buf>, value: Value<'a, 'buf>) -> Result<()> {
+        let s = match &*key.0.borrow() {
+            &Inner::String(s) => match std::str::from_utf8(s) {
+                Ok(s) => s,
+                Err(_) => return Err(Error::InvalidType),
+            },
+            _ => return Err(Error::InvalidType),
+        };
+        self.insert(s, value);
+
+        Ok(())
+    }
+
+    fn finalize(self) -> Self {
         self
     }
 }
 
-impl<'a> parser::HashBuilder<Value<'a>> for Vec<(Value<'a>, Value<'a>)> {
-    fn insert(&mut self, key: Value<'a>, value: Value<'a>) -> Result<()> {
-        self.push((key, value));
-        Ok(())
-    }
-
-    fn finalize(self) -> Vec<(Value<'a>, Value<'a>)> {
-        self
-    }
-}
-
-pub fn parse<'a>(s: &[u8], arena: &'a Arena<'a>) -> Result<Value<'a>> {
+pub fn parse<'a, 'buf>(s: &'buf [u8], arena: &'a Arena<'a, 'buf>) -> Result<Value<'a, 'buf>> {
     let builder = ArenaBuilder { arena: arena };
     parser::parse(s, builder)
 }
 
 #[cfg(test)]
 mod test {
-    use arena::Inner;
+    use arena::Arena;
     use arena::Value;
+    use arena::Inner;
     use arena::parse;
-    use typed_arena::Arena;
+
 
     #[test]
     fn test_self_ref() {

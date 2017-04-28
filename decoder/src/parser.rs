@@ -40,7 +40,7 @@ impl From<lexer::Error> for Error {
 
 pub type Result<V> = result::Result<V, Error>;
 
-pub trait Value {
+pub trait Value<'buf>: Clone {
     type Array;
     type Hash;
 
@@ -60,28 +60,28 @@ pub trait Value {
     fn set_array(&mut self, a: Self::Array);
     fn set_hash(&mut self, h: Self::Hash);
 
-    fn set_binary(&mut self, s: &[u8]);
-    fn set_string(&mut self, s: &[u8]);
+    fn set_binary(&mut self, s: &'buf [u8]);
+    fn set_string(&mut self, s: &'buf [u8]);
 
     fn set_object(&mut self, class: Self, value: Self) -> Result<()>;
     fn set_object_freeze(&mut self, class: Self, value: Self) -> Result<()>;
     fn set_regexp(&mut self, pattern: Self, flags: Self) -> Result<()>;
 }
 
-pub trait ArrayBuilder<V: Value> {
+pub trait ArrayBuilder<'buf, V: Value<'buf>> {
     fn insert(&mut self, value: V) -> Result<()>;
     fn finalize(self) -> V::Array;
 }
 
-pub trait HashBuilder<V: Value> {
+pub trait HashBuilder<'buf, V: Value<'buf>> {
     fn insert(&mut self, key: V, value: V) -> Result<()>;
     fn finalize(self) -> V::Hash;
 }
 
-pub trait Builder {
-    type Value: Value + Clone;
-    type ArrayBuilder: ArrayBuilder<Self::Value>;
-    type HashBuilder: HashBuilder<Self::Value>;
+pub trait Builder<'buf> {
+    type Value: Value<'buf>;
+    type ArrayBuilder: ArrayBuilder<'buf, Self::Value>;
+    type HashBuilder: HashBuilder<'buf, Self::Value>;
 
     fn new(&mut self) -> Self::Value;
 
@@ -89,16 +89,16 @@ pub trait Builder {
     fn build_hash(&mut self, size: u64) -> Self::HashBuilder;
 }
 
-pub struct Parser<'a, 'b, B: Builder> {
+pub struct Parser<'a, 'buf, B: Builder<'buf>> {
     config: &'a Config,
-    lexer: Lexer<'a, 'b>,
+    lexer: Lexer<'a, 'buf>,
     track: HashMap<u64, B::Value>,
     builder: B,
     copy_pos: u64,
 }
 
-impl<'a, 'b, B: Builder> Parser<'a, 'b, B> {
-    pub fn new(builder: B, config: &'a Config, input: &'b [u8]) -> Parser<'a, 'b, B> {
+impl<'a, 'buf, B: Builder<'buf>> Parser<'a, 'buf, B> {
+    pub fn new(builder: B, config: &'a Config, input: &'buf [u8]) -> Parser<'a, 'buf, B> {
         Parser {
             lexer: Lexer::new(config, input),
             config: config,
@@ -188,7 +188,7 @@ impl<'a, 'b, B: Builder> Parser<'a, 'b, B> {
         self.track.get(&p).cloned().ok_or(Error::InvalidRef(p))
     }
 
-    fn parse_array(&mut self, count: u64) -> Result<<B::Value as Value>::Array> {
+    fn parse_array(&mut self, count: u64) -> Result<<B::Value as Value<'buf>>::Array> {
         if count > self.config.max_array_size() {
             return Err(Error::ArrayTooLarge { count: count, limit: self.config.max_array_size() });
         }
@@ -201,7 +201,7 @@ impl<'a, 'b, B: Builder> Parser<'a, 'b, B> {
         Ok(v.finalize())
     }
 
-    fn parse_hash(&mut self, count: u64) -> Result<<B::Value as Value>::Hash> {
+    fn parse_hash(&mut self, count: u64) -> Result<<B::Value as Value<'buf>>::Hash> {
         if count > self.config.max_hash_size() {
             return Err(Error::HashTooLarge { count: count, limit: self.config.max_hash_size() });
         }
@@ -232,7 +232,7 @@ impl<'a, 'b, B: Builder> Parser<'a, 'b, B> {
     }
 }
 
-pub fn parse<B: Builder>(s: &[u8], builder: B) -> Result<B::Value> {
+pub fn parse<'buf, B: Builder<'buf>>(s: &'buf [u8], builder: B) -> Result<B::Value> {
     let config = Config::default();
     let mut p = Parser::new(builder, &config, s);
     p.parse()

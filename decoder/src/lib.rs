@@ -62,45 +62,42 @@ impl From<io::Error> for Error {
 }
 
 #[cfg(feature = "comp-snappy")]
-fn read_snappy_body<R: io::Read>(mut reader: R, comp_size: u64) -> io::Result<Vec<u8>> {
+fn read_snappy_body<R: io::Read>(mut reader: R, comp_size: u64, buf: &mut Vec<u8>) -> io::Result<()> {
     let mut input = vec![0; comp_size as usize];
     reader.read_exact(&mut input)?;
-    let mut output = vec![0; snap::decompress_len(&input)?];
+    buf.resize(snap::decompress_len(&input)?, 0);
     let mut dec = snap::Decoder::new();
-    dec.decompress(&input, &mut output)?;
-    Ok(output)
+    dec.decompress(&input, buf)?;
+    Ok(())
 }
 
 #[cfg(feature = "comp-zlib")]
-fn read_zlib_body<R: io::Read>(reader: R, comp_size: u64, full_size: u64) -> io::Result<Vec<u8>> {
+fn read_zlib_body<R: io::Read>(reader: R, comp_size: u64, full_size: u64, buf: &mut Vec<u8>) -> io::Result<()> {
     let mut rdr = flate2::read::ZlibDecoder::new(reader.take(comp_size));
-    let mut buf = vec![0; full_size as usize];
-    rdr.read_exact(&mut buf)?;
-    Ok(buf)
+    buf.resize(full_size as usize, 0);
+    rdr.read_exact(buf)?;
+    Ok(())
 }
 
 #[cfg(feature = "comp-zstd")]
-fn read_zstd_body<R: io::Read>(reader: R, comp_size: u64) -> io::Result<Vec<u8>> {
+fn read_zstd_body<R: io::Read>(reader: R, comp_size: u64, buf: &mut Vec<u8>) -> io::Result<()> {
     let mut rdr = zstd::stream::Decoder::new(reader.take(comp_size))?;
-    let mut buf = Vec::new();
-    rdr.read_to_end(&mut buf)?;
-    Ok(buf)
+    rdr.read_to_end(buf)?;
+    Ok(())
 }
 
-pub fn parse<R, B>(mut reader: R, builder: B) -> Result<B::Value, Error>
+pub fn parse<'buf, R, B>(mut reader: R, builder: B, buffer: &'buf mut Vec<u8>) -> Result<B::Value, Error>
 where
     R: io::Read + io::Seek,
-    B: Builder,
+    B: Builder<'buf>,
 {
     let config = Config::default();
     let header = Header::read(&mut reader, &config)?;
 
     #[allow(unreachable_patterns)]
-    let buffer: Vec<u8> = match header.document_type() {
+    match header.document_type() {
         DocumentType::Uncompressed => {
-            let mut buffer = Vec::new();
-            reader.read_to_end(&mut buffer)?;
-            buffer
+            reader.read_to_end(buffer)?;
         },
 
         #[cfg(feature = "comp-snappy")]
@@ -111,7 +108,7 @@ where
                     limit: config.max_compressed_size(),
                 });
             }
-            read_snappy_body(reader, compressed_size)?
+            read_snappy_body(reader, compressed_size, buffer)?
         },
 
         #[cfg(feature = "comp-zlib")]
@@ -130,7 +127,7 @@ where
                 });
             }
 
-            read_zlib_body(reader, compressed_size, uncompressed_size)?
+            read_zlib_body(reader, compressed_size, uncompressed_size, buffer)?
         },
 
         #[cfg(feature = "comp-zstd")]
@@ -139,13 +136,13 @@ where
                 return Err(Error::BodyTooLarge { size: compressed_size, limit: config.max_compressed_size() });
             }
 
-            read_zstd_body(reader, compressed_size)?
+            read_zstd_body(reader, compressed_size, buffer)?
         },
 
         ty => return Err(Error::UnsupportedType(ty))
     };
 
-    let mut parser = Parser::new(builder, &config, &buffer);
+    let mut parser = Parser::new(builder, &config, buffer);
     Ok(parser.parse()?)
 }
 
@@ -161,7 +158,7 @@ mod test {
     #[test]
     fn simple_snappy() {
         let raw = b"\x3d\xf3\x72\x6c\x23\x00\xb8\x00\x84\x08\x10\x28\x2b\x80\x08\x00\xfe\x01\x00\xfe\x01\x00\xfe\x01\x00\xfe\x01\x00\xfe\x01\x00\xfe\x01\x00\xfe\x01\x00\xfe\x01\x00\xfe\x01\x00\xfe\x01\x00\xfe\x01\x00\xfe\x01\x00\xfe\x01\x00\xfe\x01\x00\xfe\x01\x00\xfa\x01\x00";
-        let val = parse(Cursor::new(&raw[..]), ArcBuilder).unwrap();
+        let val = parse(Cursor::new(&raw[..]), ArcBuilder, &mut Vec::new()).unwrap();
         assert_eq!(val, Value::new(Inner::Ref(
             Value::new(Inner::Array(
                 vec![ Value::new(Inner::U64(0)); 1024 ])))));
@@ -171,7 +168,7 @@ mod test {
     #[test]
     fn simple_zlib() {
         let raw = b"\x3d\xf3\x72\x6c\x33\x00\x84\x08\x9d\x00\x78\x01\xed\xc0\x31\x0d\x00\x00\x0c\x02\xc1\x8e\x95\x42\x82\x49\xa4\x23\x84\x3f\x39\x7f\x00\x66\x15\x72\x5a\x00\xdc";
-        let val = parse(Cursor::new(&raw[..]), ArcBuilder).unwrap();
+        let val = parse(Cursor::new(&raw[..]), ArcBuilder, &mut Vec::new()).unwrap();
         assert_eq!(val, Value::new(Inner::Ref(
             Value::new(Inner::Array(
                 vec![ Value::new(Inner::U64(0)); 1024 ])))));
