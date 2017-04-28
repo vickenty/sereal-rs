@@ -1,7 +1,5 @@
 use std;
 use std::cell::Cell;
-use std::ptr;
-use std::mem;
 use std::collections::HashMap;
 
 use typed_arena;
@@ -12,7 +10,7 @@ pub use parser::Result;
 
 pub struct Arena<'a> {
     values: typed_arena::Arena<Cell<Inner<'a>>>,
-    arrays: typed_arena::Arena<Value<'a>>,
+    arrays: typed_arena::Arena<Vec<Value<'a>>>,
     hashes: typed_arena::Arena<HashMap<&'a str, Value<'a>>>,
 }
 
@@ -139,15 +137,15 @@ impl<'a> ArenaBuilder<'a> {
 
 impl<'a> parser::Builder<'a> for ArenaBuilder<'a> {
     type Value = Value<'a>;
-    type ArrayBuilder = ArrayBuilder<'a>;
+    type ArrayBuilder = &'a mut Vec<Value<'a>>;
     type HashBuilder = &'a mut HashMap<&'a str, Value<'a>>;
 
     fn new(&mut self) -> Value<'a> {
         Value(self.arena.values.alloc(Cell::new(Inner::Undef)))
     }
 
-    fn build_array(&mut self, count: u64) -> ArrayBuilder<'a> {
-        ArrayBuilder::new(&self.arena.arrays, count)
+    fn build_array(&mut self, count: u64) -> &'a mut Vec<Value<'a>> {
+        self.arena.arrays.alloc(Vec::with_capacity(count as usize))
     }
 
     fn build_hash(&mut self, count: u64) -> &'a mut HashMap<&'a str, Value<'a>> {
@@ -155,41 +153,14 @@ impl<'a> parser::Builder<'a> for ArenaBuilder<'a> {
     }
 }
 
-pub struct ArrayBuilder<'a: 'a> {
-    base: *mut [Value<'a>],
-    next: *mut Value<'a>,
-    rest: usize,
-}
-
-impl<'a> ArrayBuilder<'a> {
-    fn new(arena: &'a typed_arena::Arena<Value<'a>>, cap: u64) -> Self {
-        let cap = cap as usize;
-        unsafe {
-            let slice = arena.alloc_uninitialized(cap);
-            let first = &mut (*slice)[0] as *mut _;
-            ArrayBuilder {
-                base: slice,
-                next: first,
-                rest: cap,
-            }
-        }
-    }
-}
-
-impl<'a> parser::ArrayBuilder<'a, Value<'a>> for ArrayBuilder<'a> {
+impl<'a> parser::ArrayBuilder<'a, Value<'a>> for &'a mut Vec<Value<'a>> {
     fn insert(&mut self, v: Value<'a>) -> Result<()> {
-        assert!(self.rest > 0);
-        self.rest -= 1;
-        unsafe {
-            ptr::write(self.next, v);
-            self.next = self.next.offset(1);
-        }
+        (*self).push(v);
         Ok(())
     }
 
     fn finalize(self) -> &'a [Value<'a>] {
-        assert!(self.rest == 0);
-        unsafe { mem::transmute(self.base) }
+        self
     }
 }
 
