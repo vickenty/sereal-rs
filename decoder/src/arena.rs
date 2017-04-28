@@ -1,5 +1,5 @@
 use std;
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::ptr;
 use std::mem;
 use std::collections::HashMap;
@@ -11,8 +11,9 @@ pub use parser::Error;
 pub use parser::Result;
 
 pub struct Arena<'a, 'buf: 'a> {
-    values: typed_arena::Arena<RefCell<Inner<'a, 'buf>>>,
+    values: typed_arena::Arena<Cell<Inner<'a, 'buf>>>,
     arrays: typed_arena::Arena<Value<'a, 'buf>>,
+    hashes: typed_arena::Arena<HashMap<&'buf str, Value<'a, 'buf>>>,
 }
 
 impl<'a, 'buf> Arena<'a, 'buf> {
@@ -20,11 +21,12 @@ impl<'a, 'buf> Arena<'a, 'buf> {
         Arena {
             values: typed_arena::Arena::new(),
             arrays: typed_arena::Arena::new(),
+            hashes: typed_arena::Arena::new(),
         }
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub enum Inner<'a, 'buf: 'a> {
     Undef,
     I64(i64),
@@ -35,18 +37,18 @@ pub enum Inner<'a, 'buf: 'a> {
     Ref(Value<'a, 'buf>),
     WeakRef(Value<'a, 'buf>),
     Array(&'a [Value<'a, 'buf>]),
-    Hash(HashMap<&'a str, Value<'a, 'buf>>),
+    Hash(&'a HashMap<&'buf str, Value<'a, 'buf>>),
     Object(Value<'a, 'buf>, Value<'a, 'buf>),
     Bool(bool),
     Regexp(Value<'a, 'buf>, Value<'a, 'buf>),
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]
-pub struct Value<'a, 'buf: 'a>(pub &'a RefCell<Inner<'a, 'buf>>);
+pub struct Value<'a, 'buf: 'a>(pub &'a Cell<Inner<'a, 'buf>>);
 
 impl<'a, 'buf> parser::Value<'buf> for Value<'a, 'buf> {
     type Array = &'a [Value<'a, 'buf>];
-    type Hash = HashMap<&'a str, Value<'a, 'buf>>;
+    type Hash = &'a HashMap<&'buf str, Value<'a, 'buf>>;
 
     fn set_undef(&mut self) {
         self.set(Inner::Undef);
@@ -121,7 +123,7 @@ impl<'a, 'buf> parser::Value<'buf> for Value<'a, 'buf> {
 
 impl<'a, 'buf> Value<'a, 'buf> {
     fn set(&self, inner: Inner<'a, 'buf>) {
-        *self.0.borrow_mut() = inner;
+        self.0.set(inner)
     }
 }
 
@@ -138,18 +140,18 @@ impl<'a, 'buf> ArenaBuilder<'a, 'buf> {
 impl<'a, 'buf> parser::Builder<'buf> for ArenaBuilder<'a, 'buf> {
     type Value = Value<'a, 'buf>;
     type ArrayBuilder = ArrayBuilder<'a, 'buf>;
-    type HashBuilder = HashMap<&'a str, Value<'a, 'buf>>;
+    type HashBuilder = &'a mut HashMap<&'buf str, Value<'a, 'buf>>;
 
     fn new(&mut self) -> Value<'a, 'buf> {
-        Value(self.arena.values.alloc(RefCell::new(Inner::Undef)))
+        Value(self.arena.values.alloc(Cell::new(Inner::Undef)))
     }
 
     fn build_array(&mut self, count: u64) -> ArrayBuilder<'a, 'buf> {
         ArrayBuilder::new(&self.arena.arrays, count)
     }
 
-    fn build_hash(&mut self, count: u64) -> HashMap<&'a str, Value<'a, 'buf>> {
-        HashMap::with_capacity(count as usize)
+    fn build_hash(&mut self, count: u64) -> &'a mut HashMap<&'buf str, Value<'a, 'buf>> {
+        self.arena.hashes.alloc(HashMap::with_capacity(count as usize))
     }
 }
 
@@ -191,21 +193,22 @@ impl<'a, 'buf> parser::ArrayBuilder<'buf, Value<'a, 'buf>> for ArrayBuilder<'a, 
     }
 }
 
-impl<'a, 'buf> parser::HashBuilder<'buf, Value<'a, 'buf>> for HashMap<&'a str, Value<'a, 'buf>> {
+impl<'a, 'buf> parser::HashBuilder<'buf, Value<'a, 'buf>> for &'a mut HashMap<&'buf str, Value<'a, 'buf>> {
     fn insert(&mut self, key: Value<'a, 'buf>, value: Value<'a, 'buf>) -> Result<()> {
-        let s = match &*key.0.borrow() {
-            &Inner::String(s) => match std::str::from_utf8(s) {
+        let s = match key.0.get() {
+            Inner::String(s) => match std::str::from_utf8(s) {
                 Ok(s) => s,
-                Err(_) => return Err(Error::InvalidType),
+                _ => return Err(Error::InvalidType),
             },
             _ => return Err(Error::InvalidType),
         };
-        self.insert(s, value);
+
+        (*self).insert(s, value);
 
         Ok(())
     }
 
-    fn finalize(self) -> Self {
+    fn finalize(self) -> &'a HashMap<&'buf str, Value<'a, 'buf>> {
         self
     }
 }
@@ -228,8 +231,8 @@ mod test {
         let arena = Arena::new();
         let a = parse(b"\xa9\x01", &arena).unwrap();
         let a_id = a.0 as *const _ as usize;
-        let b_id = match &*a.0.borrow() {
-            &Inner::Ref(Value(b)) => b as *const _ as usize,
+        let b_id = match a.0.get() {
+            Inner::Ref(Value(b)) => b as *const _ as usize,
             _ => panic!("expecting reference"),
         };
         assert_eq!(a_id, b_id);
