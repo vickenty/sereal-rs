@@ -5,7 +5,7 @@ use byteorder::ReadBytesExt;
 #[derive(Debug)]
 pub enum Error {
     Overflow,
-    IOError(io::Error),
+    UnexpectedEof,
 }
 
 impl Error {
@@ -16,39 +16,30 @@ impl Error {
         }
     }
 
-    pub fn is_io_error(&self) -> bool {
-        match self {
-            &Error::IOError(_) => true,
-            _ => false,
-        }
-    }
-
     pub fn is_eof(&self) -> bool {
         match self {
-            &Error::IOError(ref e) => e.kind() == io::ErrorKind::UnexpectedEof,
+            &Error::UnexpectedEof => true,
             _ => false,
         }
-    }
-}
-
-impl From<io::Error> for Error {
-    fn from(e: io::Error) -> Error {
-        Error::IOError(e)
     }
 }
 
 type Result<T> = result::Result<T, Error>;
 
+fn straighten(v: u64) -> i64 {
+    (v >> 1) as i64 ^ -((v & 1) as i64)
+}
+
 pub trait VarintReaderExt {
-    fn read_varint(&mut self) -> Result<u64>;
-    fn read_zigzag(&mut self) -> Result<i64> {
+    fn read_varint(&mut self) -> io::Result<u64>;
+    fn read_zigzag(&mut self) -> io::Result<i64> {
         let v = self.read_varint()?;
-        Ok((v >> 1) as i64 ^ -((v & 1) as i64))
+        Ok(straighten(v))
     }
 }
 
 impl<R: io::Read> VarintReaderExt for R {
-    fn read_varint(&mut self) -> Result<u64> {
+    fn read_varint(&mut self) -> io::Result<u64> {
         let mut a = 0;
         let mut o = 0;
 
@@ -62,10 +53,35 @@ impl<R: io::Read> VarintReaderExt for R {
 
             o += 7;
             if o >= 64 {
-                return Err(Error::Overflow);
+                return Err(io::Error::new(io::ErrorKind::Other, "varint overflow"));
             }
         }
     }
+}
+
+pub fn parse_varint(buf: &[u8]) -> Result<(u64, usize)> {
+    let mut a = 0;
+    let mut o = 0;
+
+    for i in buf {
+        a |= ((i & 0x7f) as u64) << (o * 7);
+        o += 1;
+
+        if i & 0x80 == 0 {
+            return Ok((a, o));
+        }
+
+        if o >= 10 {
+            return Err(Error::Overflow);
+        }
+    }
+
+    Err(Error::UnexpectedEof)
+}
+
+pub fn parse_zigzag(buf: &[u8]) -> Result<(i64, usize)> {
+    let (val, len) = parse_varint(buf)?;
+    Ok((straighten(val), len))
 }
 
 #[cfg(test)]

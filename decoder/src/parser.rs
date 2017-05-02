@@ -16,9 +16,9 @@ pub enum Error {
     InvalidCopy,
     UnexpectedEof,
     OffsetOverflow,
+    VarintOverflow,
     ArrayTooLarge { count: u64, limit: u64 },
     HashTooLarge { count: u64, limit: u64 },
-    VarintError(varint::Error),
 }
 
 impl Error {
@@ -38,8 +38,11 @@ impl Error {
 }
 
 impl From<varint::Error> for Error {
-    fn from(e: varint::Error) -> Self {
-        Error::VarintError(e)
+    fn from(e: varint::Error) -> Error {
+        match e {
+            varint::Error::UnexpectedEof => Error::UnexpectedEof,
+            varint::Error::Overflow => Error::VarintOverflow,
+        }
     }
 }
 
@@ -276,16 +279,14 @@ impl<'a, 'buf, B: Builder<'buf>> Parser<'a, 'buf, B> {
     }
 
     fn read_varint(&mut self) -> Result<u64> {
-        let mut cursor = io::Cursor::new(&self.input[self.pos..]);
-        let val = cursor.read_varint()?;
-        self.pos += cursor.position() as usize;
+        let (val, len) = varint::parse_varint(&self.input[self.pos..])?;
+        self.pos += len;
         Ok(val)
     }
 
     fn read_zigzag(&mut self) -> Result<i64> {
-        let mut cursor = io::Cursor::new(&self.input[self.pos..]);
-        let val = cursor.read_zigzag()?;
-        self.pos += cursor.position() as usize;
+        let (val, len) = varint::parse_zigzag(&self.input[self.pos..])?;
+        self.pos += len;
         Ok(val)
     }
 

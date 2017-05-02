@@ -59,15 +59,6 @@ impl From<io::Error> for Error {
     }
 }
 
-impl From<varint::Error> for Error {
-    fn from(e: varint::Error) -> Error {
-        match e {
-            varint::Error::Overflow => Error::SuffixTooLarge,
-            varint::Error::IOError(e) => Error::IOError(e),
-        }
-    }
-}
-
 pub type Result<T> = result::Result<T, Error>;
 
 #[derive(Copy, Clone, Debug, PartialEq, PartialOrd)]
