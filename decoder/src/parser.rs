@@ -15,6 +15,7 @@ pub enum Error {
     InvalidRef(usize),
     InvalidCopy,
     UnexpectedEof,
+    OffsetOverflow,
     ArrayTooLarge { count: u64, limit: u64 },
     HashTooLarge { count: u64, limit: u64 },
     VarintError(varint::Error),
@@ -78,7 +79,7 @@ pub trait ArrayBuilder<'buf, V: Value<'buf>> {
 }
 
 pub trait HashBuilder<'buf, V: Value<'buf>> {
-    fn insert(&mut self, key: V, value: V) -> Result<()>;
+    fn insert(&mut self, key: &'buf [u8], value: V) -> Result<()>;
     fn finalize(self) -> V::Hash;
 }
 
@@ -118,12 +119,27 @@ impl<'a, 'buf, B: Builder<'buf>> Parser<'a, 'buf, B> {
         self.parse_inner(false)
     }
 
-    fn parse_str(&mut self, force_track: bool) -> Result<B::Value> {
-        let saved = self.copy_pos;
-        self.copy_pos = 0;
-        let res = self.parse_inner(force_track);
-        self.copy_pos = saved;
-        res
+    fn parse_str(&mut self) -> Result<&'buf [u8]> {
+        use sereal_common::constants::*;
+
+        let tag = self.read_tag()?;
+        let tag = tag & TYPE_MASK;
+
+        match tag {
+            SHORT_BINARY_0...SHORT_BINARY_31 => {
+                let len = tag - SHORT_BINARY_0;
+                self.read_bytes(len.into())
+            },
+
+            STR_UTF8 | BINARY => {
+                let len = self.read_varlen()?;
+                self.read_bytes(len)
+            },
+
+            COPY => self.do_copy(|p| p.parse_str()),
+
+            _ => Err(Error::InvalidType)
+        }
     }
 
     fn parse_inner(&mut self, force_track: bool) -> Result<B::Value> {
@@ -156,29 +172,14 @@ impl<'a, 'buf, B: Builder<'buf>> Parser<'a, 'buf, B> {
 
             REFN => value.set_ref(self.parse()?),
             REFP => {
-                let p = self.read_varint()? as usize;
+                let p = self.read_varlen()?;
                 value.set_ref(self.get(p)?);
             },
             ALIAS => {
-                let p = self.read_varint()? as usize;
+                let p = self.read_varlen()?;
                 value.set_alias(self.get(p)?)
             },
-            COPY => {
-                if self.copy_pos != 0 {
-                    return Err(Error::InvalidCopy);
-                }
-
-                let pos = self.read_varint()? as usize;
-                self.copy_pos = self.pos;
-                self.pos = pos - 1;
-
-                let val = self.parse()?;
-
-                self.pos = self.copy_pos;
-                self.copy_pos = 0;
-
-                value.set_alias(val);
-            },
+            COPY => value.set_alias(self.do_copy(|p| p.parse())?),
             WEAKEN => value.set_weak_ref(self.parse()?),
             ARRAY => {
                 let len = self.read_varint()?;
@@ -204,34 +205,28 @@ impl<'a, 'buf, B: Builder<'buf>> Parser<'a, 'buf, B> {
             },
 
             BINARY => {
-                let len = self.read_varint()?;
-                let beg = self.pos;
-                self.pos += len as usize;
-                value.set_binary(&self.input[beg..self.pos]);
+                let len = self.read_varlen()?;
+                value.set_binary(self.read_bytes(len)?);
             },
 
             STR_UTF8 => {
-                let len = self.read_varint()?;
-                let beg = self.pos;
-                self.pos += len as usize;
-                value.set_string(&self.input[beg..self.pos]);
+                let len = self.read_varlen()?;
+                value.set_string(self.read_bytes(len)?);
             },
 
             SHORT_BINARY_0...SHORT_BINARY_31 => {
                 let len = tag - SHORT_BINARY_0;
-                let beg = self.pos;
-                self.pos += len as usize;
-                value.set_binary(&self.input[beg..self.pos]);
+                value.set_binary(self.read_bytes(len.into())?);
             },
 
-            OBJECT => value.set_object(self.parse_str(true)?, self.parse()?)?,
+            OBJECT => value.set_object(self.parse_inner(true)?, self.parse()?)?,
             OBJECTV => {
-                let pos = self.read_varint()? as usize;
+                let pos = self.read_varlen()?;
                 value.set_object(self.get(pos)?, self.parse()?)?;
             },
-            OBJECT_FREEZE => value.set_object_freeze(self.parse_str(true)?, self.parse()?)?,
+            OBJECT_FREEZE => value.set_object_freeze(self.parse_inner(true)?, self.parse()?)?,
             OBJECTV_FREEZE => {
-                let pos = self.read_varint()? as usize;
+                let pos = self.read_varlen()?;
                 value.set_object_freeze(self.get(pos)?, self.parse()?)?;
             },
 
@@ -294,6 +289,42 @@ impl<'a, 'buf, B: Builder<'buf>> Parser<'a, 'buf, B> {
         Ok(val)
     }
 
+    fn read_varlen(&mut self) -> Result<usize> {
+        let len = self.read_varint()?;
+        if len < usize::max_value() as u64 {
+            Ok(len as usize)
+        } else {
+            Err(Error::OffsetOverflow)
+        }
+    }
+
+    fn read_bytes(&mut self, len: usize) -> Result<&'buf [u8]> {
+        let beg = self.pos;
+        self.pos = self.pos.checked_add(len).ok_or(Error::OffsetOverflow)?;
+        if self.pos <= self.input.len() {
+            Ok(&self.input[beg..self.pos])
+        } else {
+            Err(Error::UnexpectedEof)
+        }
+    }
+
+    fn do_copy<T, F: FnOnce(&mut Self) -> Result<T>>(&mut self, f: F)-> Result<T> {
+        if self.copy_pos != 0 {
+            return Err(Error::InvalidCopy);
+        }
+
+        let pos = self.read_varlen()?;
+        self.copy_pos = self.pos;
+        self.pos = pos - 1;
+
+        let val = f(self);
+
+        self.pos = self.copy_pos;
+        self.copy_pos = 0;
+
+        val
+    }
+
     fn parse_array(&mut self, count: u64) -> Result<<B::Value as Value<'buf>>::Array> {
         if count > self.config.max_array_size() {
             return Err(Error::ArrayTooLarge { count: count, limit: self.config.max_array_size() });
@@ -312,12 +343,18 @@ impl<'a, 'buf, B: Builder<'buf>> Parser<'a, 'buf, B> {
             return Err(Error::HashTooLarge { count: count, limit: self.config.max_hash_size() });
         }
 
+        let old_copy_pos = self.copy_pos;
+        self.copy_pos = 0;
+
         let mut m = self.builder.build_hash(count);
         for _ in 0..count {
-            let k = self.parse_str(false)?;
+            let k = self.parse_str()?;
             let v = self.parse()?;
             m.insert(k, v)?;
         }
+
+        self.copy_pos = old_copy_pos;
+
         Ok(m.finalize())
     }
 }

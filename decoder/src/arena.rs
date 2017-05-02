@@ -165,12 +165,9 @@ impl<'a> parser::ArrayBuilder<'a, Value<'a>> for &'a mut Vec<Value<'a>> {
 }
 
 impl<'a> parser::HashBuilder<'a, Value<'a>> for &'a mut HashMap<&'a str, Value<'a>> {
-    fn insert(&mut self, key: Value<'a>, value: Value<'a>) -> Result<()> {
-        let s = match key.0.get() {
-            Inner::String(s) => match std::str::from_utf8(s) {
-                Ok(s) => s,
-                _ => return Err(Error::InvalidType),
-            },
+    fn insert(&mut self, key: &'a [u8], value: Value<'a>) -> Result<()> {
+        let s = match std::str::from_utf8(key) {
+            Ok(s) => s,
             _ => return Err(Error::InvalidType),
         };
 

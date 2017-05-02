@@ -289,8 +289,8 @@ impl<'buf> parser::ArrayBuilder<'buf, Value> for Vec<Value> {
 }
 
 impl<'buf> parser::HashBuilder<'buf, Value> for HashMap<Vec<u8>, Value> {
-    fn insert(&mut self, key: Value, value: Value) -> Result<()> {
-        self.insert(key.to_string()?, value);
+    fn insert(&mut self, key: &'buf [u8], value: Value) -> Result<()> {
+        self.insert(key.to_vec(), value);
         Ok(())
     }
 
