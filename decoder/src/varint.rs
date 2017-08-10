@@ -86,6 +86,7 @@ pub fn parse_zigzag(buf: &[u8]) -> Result<(i64, usize)> {
 
 #[cfg(test)]
 mod test {
+    use std::io;
     use std::io::Cursor;
     use super::{Error, Result, VarintReaderExt};
 
@@ -93,7 +94,7 @@ mod test {
     fn test_varint() {
         use std::u64::MAX;
 
-        fn r(s: &[u8]) -> Result<u64> {
+        fn r(s: &[u8]) -> io::Result<u64> {
             Cursor::new(s).read_varint()
         }
 
@@ -101,7 +102,7 @@ mod test {
             r(s).unwrap()
         }
 
-        fn e(s: &[u8]) -> Error {
+        fn e(s: &[u8]) -> io::Error {
             r(s).unwrap_err()
         }
 
@@ -114,15 +115,15 @@ mod test {
         assert_eq!(t(b"\x80\x80\x80\x80\x80\x80\x80\x80\x80\x00"), 0);
         assert_eq!(t(b"\xff\xff\xff\xff\xff\xff\xff\xff\xff\x7f"), MAX);
 
-        assert!(e(b"\x80").is_eof());
-        assert!(e(b"\x80\x80\x80\x80\x80\x80\x80\x80\x80\x80\x00").is_overflow());
+        assert_eq!(e(b"\x80").kind(), io::ErrorKind::UnexpectedEof);
+        assert_eq!(format!("{}", e(b"\x80\x80\x80\x80\x80\x80\x80\x80\x80\x80\x00")), "varint overflow");
     }
 
     #[test]
     fn test_zigzag() {
         use std::i64::{MIN, MAX};
 
-        fn r(s: &[u8]) -> Result<i64> {
+        fn r(s: &[u8]) -> io::Result<i64> {
             Cursor::new(s).read_zigzag()
         }
 
@@ -130,7 +131,7 @@ mod test {
             r(s).unwrap()
         }
 
-        fn e(s: &[u8]) -> Error {
+        fn e(s: &[u8]) -> io::Error {
             r(s).unwrap_err()
         }
 
@@ -147,7 +148,7 @@ mod test {
         assert_eq!(t(b"\xfe\xff\xff\xff\xff\xff\xff\xff\xff\x7f"), MAX);
         assert_eq!(t(b"\xff\xff\xff\xff\xff\xff\xff\xff\xff\x7f"), MIN);
 
-        assert!(e(b"\x80").is_eof());
-        assert!(e(b"\x80\x80\x80\x80\x80\x80\x80\x80\x80\x80\x00").is_overflow());
+        assert_eq!(e(b"\x80").kind(), io::ErrorKind::UnexpectedEof);
+        assert_eq!(format!("{}", e(b"\x80\x80\x80\x80\x80\x80\x80\x80\x80\x80\x00")), "varint overflow");
     }
 }
