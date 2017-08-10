@@ -4,7 +4,6 @@ use std::result;
 use byteorder::{ LittleEndian, ByteOrder };
 use sereal_common::constants::*;
 
-use varint;
 use varint::VarintReaderExt;
 
 use config::Config;

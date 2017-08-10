@@ -1,4 +1,3 @@
-use std::io;
 use std::result;
 use std::collections::HashMap;
 
@@ -7,7 +6,6 @@ use byteorder::ByteOrder;
 
 use config::Config;
 use varint;
-use varint::VarintReaderExt;
 
 #[derive(Debug)]
 pub enum Error {

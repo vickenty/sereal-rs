@@ -4,7 +4,6 @@ use byteorder::{ LittleEndian, ReadBytesExt };
 use sereal_common::constants::*;
 
 use config::Config;
-use varint;
 use varint::VarintReaderExt;
 
 #[derive(Debug)]

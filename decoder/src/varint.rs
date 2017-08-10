@@ -88,7 +88,7 @@ pub fn parse_zigzag(buf: &[u8]) -> Result<(i64, usize)> {
 mod test {
     use std::io;
     use std::io::Cursor;
-    use super::{Error, Result, VarintReaderExt};
+    use super::VarintReaderExt;
 
     #[test]
     fn test_varint() {
