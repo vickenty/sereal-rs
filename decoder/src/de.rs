@@ -170,10 +170,18 @@ impl<'cfg, 'a, 'de> de::Deserializer<'de> for &'a mut Deserializer<'cfg, 'de> {
     fn deserialize_unit<V: de::Visitor<'de>>(self, v: V) -> Result<V::Value, Error> {
         self.deserialize_any(v)
     }
-    fn deserialize_unit_struct<V: de::Visitor<'de>>(self, _: &'static str, v: V) -> Result<V::Value, Error> {
+    fn deserialize_unit_struct<V: de::Visitor<'de>>(
+        self,
+        _: &'static str,
+        v: V,
+    ) -> Result<V::Value, Error> {
         self.deserialize_any(v)
     }
-    fn deserialize_newtype_struct<V: de::Visitor<'de>>(self, _: &'static str, v: V) -> Result<V::Value, Error> {
+    fn deserialize_newtype_struct<V: de::Visitor<'de>>(
+        self,
+        _: &'static str,
+        v: V,
+    ) -> Result<V::Value, Error> {
         self.deserialize_any(v)
     }
     fn deserialize_seq<V: de::Visitor<'de>>(self, v: V) -> Result<V::Value, Error> {
@@ -182,16 +190,31 @@ impl<'cfg, 'a, 'de> de::Deserializer<'de> for &'a mut Deserializer<'cfg, 'de> {
     fn deserialize_tuple<V: de::Visitor<'de>>(self, _: usize, v: V) -> Result<V::Value, Error> {
         self.deserialize_any(v)
     }
-    fn deserialize_tuple_struct<V: de::Visitor<'de>>(self, _: &'static str, _: usize, v: V) -> Result<V::Value, Error> {
+    fn deserialize_tuple_struct<V: de::Visitor<'de>>(
+        self,
+        _: &'static str,
+        _: usize,
+        v: V,
+    ) -> Result<V::Value, Error> {
         self.deserialize_any(v)
     }
     fn deserialize_map<V: de::Visitor<'de>>(self, v: V) -> Result<V::Value, Error> {
         self.deserialize_any(v)
     }
-    fn deserialize_struct<V: de::Visitor<'de>>(self, _: &'static str, _: &'static [&'static str], v: V) -> Result<V::Value, Error> {
+    fn deserialize_struct<V: de::Visitor<'de>>(
+        self,
+        _: &'static str,
+        _: &'static [&'static str],
+        v: V,
+    ) -> Result<V::Value, Error> {
         self.deserialize_any(v)
     }
-    fn deserialize_enum<V: de::Visitor<'de>>(self, _: &'static str, _: &'static [&'static str], v: V) -> Result<V::Value, Error> {
+    fn deserialize_enum<V: de::Visitor<'de>>(
+        self,
+        _: &'static str,
+        _: &'static [&'static str],
+        v: V,
+    ) -> Result<V::Value, Error> {
         self.deserialize_any(v)
     }
     fn deserialize_identifier<V: de::Visitor<'de>>(self, v: V) -> Result<V::Value, Error> {
@@ -219,7 +242,10 @@ impl<'a, 'cfg, 'de> Seq<'a, 'cfg, 'de> {
 impl<'de, 'a, 'cfg> de::SeqAccess<'de> for Seq<'a, 'cfg, 'de> {
     type Error = Error;
 
-    fn next_element_seed<T: de::DeserializeSeed<'de>>(&mut self, seed: T) -> Result<Option<T::Value>, Error> {
+    fn next_element_seed<T: de::DeserializeSeed<'de>>(
+        &mut self,
+        seed: T,
+    ) -> Result<Option<T::Value>, Error> {
         if self.count == 0 {
             return Ok(None);
         }
@@ -247,7 +273,10 @@ impl<'a, 'cfg, 'de> Map<'a, 'cfg, 'de> {
 impl<'de, 'a, 'cfg> de::MapAccess<'de> for Map<'a, 'cfg, 'de> {
     type Error = Error;
 
-    fn next_key_seed<T: de::DeserializeSeed<'de>>(&mut self, seed: T) -> Result<Option<T::Value>, Error> {
+    fn next_key_seed<T: de::DeserializeSeed<'de>>(
+        &mut self,
+        seed: T,
+    ) -> Result<Option<T::Value>, Error> {
         if self.count == 0 {
             return Ok(None);
         }
@@ -301,7 +330,10 @@ mod test {
     #[test]
     fn vecs() {
         assert_eq!(Vec::<i32>::de(b"\x43\x01\x02\x03"), vec![1, 2, 3]);
-        assert_eq!(Option::<Vec<u64>>::de(b"\x28\x2b\x03\x01\x02\x03"), Some(vec![1, 2, 3]));
+        assert_eq!(
+            Option::<Vec<u64>>::de(b"\x28\x2b\x03\x01\x02\x03"),
+            Some(vec![1, 2, 3])
+        );
     }
 
     #[test]
@@ -318,7 +350,10 @@ mod test {
         #[derive(Deserialize, PartialEq, Debug)]
         struct S(u32, u64, Vec<u8>);
 
-        assert_eq!(S::de(b"\x43\x01\x02\x43\x03\x04\x05"), S(1, 2, vec![3, 4, 5]));
+        assert_eq!(
+            S::de(b"\x43\x01\x02\x43\x03\x04\x05"),
+            S(1, 2, vec![3, 4, 5])
+        );
     }
 
     #[test]
@@ -351,8 +386,20 @@ mod test {
         let s = Some(Box::new(S { f: None, g: None }));
 
         assert_eq!(S::de(b"\x50"), S { f: None, g: None });
-        assert_eq!(S::de(b"\x42\x28\x50\x25"), S { f: s.clone(), g: None });
-        assert_eq!(S::de(b"\x42\x28\xd0\x29\x03"), S { f: s.clone(), g: s.clone() });
+        assert_eq!(
+            S::de(b"\x42\x28\x50\x25"),
+            S {
+                f: s.clone(),
+                g: None,
+            }
+        );
+        assert_eq!(
+            S::de(b"\x42\x28\xd0\x29\x03"),
+            S {
+                f: s.clone(),
+                g: s.clone(),
+            }
+        );
         assert_eq!(S::err(b"\x42\x29\x01\x28\x50").as_invalid_ref(), Some(1));
         assert_eq!(S::err(b"\x42\x28\x50\x29\x01").as_invalid_ref(), Some(1));
     }
@@ -369,6 +416,13 @@ mod test {
         let d = b"\x43\x63foo\x63bar\x63baz";
         let s = S::de(&d[..]);
 
-        assert_eq!(s, S { a: "foo", b: "bar", c: "baz" });
+        assert_eq!(
+            s,
+            S {
+                a: "foo",
+                b: "bar",
+                c: "baz",
+            }
+        );
     }
 }

@@ -2,7 +2,7 @@ use std::result;
 use std::mem;
 use byteorder::LittleEndian;
 use byteorder::ByteOrder;
-use sereal_common::constants::{ TYPE_MASK, PAD };
+use sereal_common::constants::{TYPE_MASK, PAD};
 use varint;
 
 pub enum Error {

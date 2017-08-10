@@ -1,4 +1,4 @@
-use std::collections::{ HashSet, HashMap };
+use std::collections::{HashSet, HashMap};
 use std::fmt;
 use std::sync::*;
 
@@ -43,9 +43,11 @@ impl Value {
     fn read(&self) -> Inner {
         match self {
             &Value::Strong(ref a) => (&*a.read().unwrap()).clone(),
-            &Value::Weak(ref w) => match w.upgrade() {
-                Some(ref l) => (&*l.read().unwrap()).clone(),
-                None => Inner::Undef,
+            &Value::Weak(ref w) => {
+                match w.upgrade() {
+                    Some(ref l) => (&*l.read().unwrap()).clone(),
+                    None => Inner::Undef,
+                }
             }
         }
     }
@@ -53,12 +55,12 @@ impl Value {
     /// Update the inner value.
     fn set(&self, v: Inner) {
         match self {
-            &Value::Strong(ref a) => { *a.write().unwrap() = v },
+            &Value::Strong(ref a) => *a.write().unwrap() = v,
             &Value::Weak(ref w) => {
                 let a = w.upgrade().expect("writing expired weak-ref");
                 let mut l = a.write().unwrap();
                 *l = v;
-            },
+            }
         }
     }
 
@@ -95,9 +97,9 @@ impl Value {
                     seen.insert(obj_id);
                     (&*a.read().unwrap()).debug_fmt(f, seen)
                 }
-            },
+            }
 
-            None => write!(f, "<dead weak ref>")
+            None => write!(f, "<dead weak ref>"),
         }
     }
 }
@@ -120,7 +122,10 @@ impl From<u64> for Inner {
     }
 }
 
-impl<T> From<T> for Value where Inner: From<T> {
+impl<T> From<T> for Value
+where
+    Inner: From<T>,
+{
     fn from(v: T) -> Value {
         Value::new(Inner::from(v))
     }
@@ -145,7 +150,7 @@ impl Inner {
             &Inner::Ref(ref v) => {
                 write!(f, "\\")?;
                 v.debug_fmt(f, seen)?;
-            },
+            }
 
             &Inner::WeakRef(ref v) => {
                 write!(f, "\\?")?;
@@ -158,7 +163,7 @@ impl Inner {
                     v.debug_fmt(f, seen)?;
                 }
                 write!(f, ")")?;
-            },
+            }
 
             &Inner::Hash(ref h) => {
                 write!(f, "Hash(")?;
@@ -167,13 +172,13 @@ impl Inner {
                     v.debug_fmt(f, seen)?;
                 }
                 write!(f, ")")?;
-            },
+            }
 
             &Inner::Object(ref class, ref obj) => {
                 write!(f, "<{:?}=", class)?;
                 obj.debug_fmt(f, seen)?;
                 write!(f, ">")?;
-            },
+            }
 
             other => write!(f, "{:?}", other)?,
         }
@@ -198,7 +203,7 @@ impl<'buf> parser::Value<'buf> for Value {
         self.set(Inner::Bool(true));
     }
 
-    fn set_i64(&mut self, v: i64){
+    fn set_i64(&mut self, v: i64) {
         self.set(Inner::I64(v))
     }
 
@@ -308,7 +313,7 @@ mod test {
     use std::collections::HashMap;
 
     use arc::parse;
-    use arc::{Value, Inner };
+    use arc::{Value, Inner};
     use arc::Inner::*;
     use arc::Error;
 
@@ -325,8 +330,11 @@ mod test {
 
     #[test]
     fn test_array() {
-        assert_eq!(p(b"\x2b\x01\x00"), Array(vec![ Value::from(0u64) ]));
-        assert_eq!(p(b"\x2b\x02\x00\x00"), Array(vec![ Value::from(0u64), Value::from(0u64) ]));
+        assert_eq!(p(b"\x2b\x01\x00"), Array(vec![Value::from(0u64)]));
+        assert_eq!(
+            p(b"\x2b\x02\x00\x00"),
+            Array(vec![Value::from(0u64), Value::from(0u64)])
+        );
         assert!(parse(b"\x2b\x02\x00").unwrap_err().is_eof());
     }
 
@@ -361,10 +369,12 @@ mod test {
         };
 
         let b_id = match a.read() {
-            Inner::Ref(v) => match v {
-                Value::Strong(ref a) => a.as_ref() as *const _ as usize,
-                Value::Weak(_) => panic!("unexpected weak ref"),
-            },
+            Inner::Ref(v) => {
+                match v {
+                    Value::Strong(ref a) => a.as_ref() as *const _ as usize,
+                    Value::Weak(_) => panic!("unexpected weak ref"),
+                }
+            }
             _ => panic!("unexpected value"),
         };
 
@@ -396,14 +406,18 @@ mod test {
     #[test]
     fn test_objects() {
         let parsed = p(b"\x42\x2c\x63foo\x28\x2a\x00\x2d\x03\x28\x2a\x00");
-        use arc::Inner::{ Ref, Object, Array, Hash };
+        use arc::Inner::{Ref, Object, Array, Hash};
 
-        let value = Ref(
-            Value::new(Array(vec![
-                Value::new(Object(b"foo".to_vec(), Value::new(Ref(Value::new(Hash(HashMap::new())))))),
-                Value::new(Object(b"foo".to_vec(), Value::new(Ref(Value::new(Hash(HashMap::new())))))),
-            ])),
-        );
+        let value = Ref(Value::new(Array(vec![
+            Value::new(Object(
+                b"foo".to_vec(),
+                Value::new(Ref(Value::new(Hash(HashMap::new())))),
+            )),
+            Value::new(Object(
+                b"foo".to_vec(),
+                Value::new(Ref(Value::new(Hash(HashMap::new())))),
+            )),
+        ])));
 
         assert_eq!(parsed, value);
     }
@@ -422,31 +436,46 @@ mod test {
 
     #[test]
     fn test_copy_complex_value() {
-        assert_eq!(p(b"\x43\x41\x01\x2f\x02\x2f\x02"), Ref(Value::new(Array(vec![
-            Value::new(Ref(Value::new(Array(vec![Value::new(U64(1))])))),
-            Value::new(Ref(Value::new(Array(vec![Value::new(U64(1))])))),
-            Value::new(Ref(Value::new(Array(vec![Value::new(U64(1))])))),
-        ]))));
+        assert_eq!(
+            p(b"\x43\x41\x01\x2f\x02\x2f\x02"),
+            Ref(Value::new(Array(vec![
+                Value::new(
+                    Ref(Value::new(Array(vec![Value::new(U64(1))])))
+                ),
+                Value::new(
+                    Ref(Value::new(Array(vec![Value::new(U64(1))])))
+                ),
+                Value::new(
+                    Ref(Value::new(Array(vec![Value::new(U64(1))])))
+                ),
+            ])))
+        );
     }
 
     #[test]
     fn test_copy_hash_key() {
         let mut map = HashMap::new();
-        map.insert(vec![ b'a' ], Value::new(U64(1)));
+        map.insert(vec![b'a'], Value::new(U64(1)));
 
-        assert_eq!(p(b"\x43\x61a\x51\x2f\x02\x01\x2f\x04"), Ref(Value::new(Array(vec![
-            Value::new(String(vec![ b'a' ])),
-            Value::new(Ref(Value::new(Hash(map.clone())))),
-            Value::new(Ref(Value::new(Hash(map.clone())))),
-        ]))));
+        assert_eq!(
+            p(b"\x43\x61a\x51\x2f\x02\x01\x2f\x04"),
+            Ref(Value::new(Array(vec![
+                Value::new(String(vec![b'a'])),
+                Value::new(Ref(Value::new(Hash(map.clone())))),
+                Value::new(Ref(Value::new(Hash(map.clone())))),
+            ])))
+        );
     }
 
     #[test]
     fn test_f32() {
-        assert_eq!(p(b"\x2b\x03\x22\x00\x00\x00\x00\x2f\x03\x63foo"), Array(vec![
-            Value::new(F32(0.0)),
-            Value::new(F32(0.0)),
-            Value::new(String(b"foo".to_vec())),
-        ]));
+        assert_eq!(
+            p(b"\x2b\x03\x22\x00\x00\x00\x00\x2f\x03\x63foo"),
+            Array(vec![
+                Value::new(F32(0.0)),
+                Value::new(F32(0.0)),
+                Value::new(String(b"foo".to_vec())),
+            ])
+        );
     }
 }

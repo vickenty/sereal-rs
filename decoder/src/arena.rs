@@ -60,7 +60,7 @@ impl<'a> parser::Value<'a> for Value<'a> {
         self.set(Inner::Bool(true));
     }
 
-    fn set_i64(&mut self, v: i64){
+    fn set_i64(&mut self, v: i64) {
         self.set(Inner::I64(v))
     }
 
@@ -149,7 +149,9 @@ impl<'a> parser::Builder<'a> for ArenaBuilder<'a> {
     }
 
     fn build_hash(&mut self, count: u64) -> &'a mut HashMap<&'a str, Value<'a>> {
-        self.arena.hashes.alloc(HashMap::with_capacity(count as usize))
+        self.arena.hashes.alloc(
+            HashMap::with_capacity(count as usize),
+        )
     }
 }
 

@@ -1,7 +1,7 @@
 use std::io;
 use std::result;
 
-use byteorder::{ LittleEndian, ByteOrder };
+use byteorder::{LittleEndian, ByteOrder};
 use sereal_common::constants::*;
 
 use varint::VarintReaderExt;
@@ -29,7 +29,7 @@ impl Error {
     pub fn is_varint_overflow(&self) -> bool {
         match *self {
             Error::VarintOverflow => true,
-            _ => false
+            _ => false,
         }
     }
 
@@ -103,11 +103,9 @@ impl<'a, 'b> Lexer<'a, 'b> {
         let tag = tag & TYPE_MASK;
 
         let value = match tag {
-            POS_0...
-            POS_15 => Tag::Pos(tag),
+            POS_0...POS_15 => Tag::Pos(tag),
 
-            NEG_16...
-            NEG_1 => Tag::Neg((tag | 0xf0) as i8),
+            NEG_16...NEG_1 => Tag::Neg((tag | 0xf0) as i8),
 
             VARINT => Tag::Varint(self.read_varint()?),
             ZIGZAG => Tag::Zigzag(self.read_zigzag()?),
@@ -138,8 +136,7 @@ impl<'a, 'b> Lexer<'a, 'b> {
             OBJECT_FREEZE => Tag::ObjectFreeze,
             OBJECTV_FREEZE => Tag::ObjectVFreeze(self.read_varint()?),
 
-            RESERVED_0...
-            RESERVED_4 => return Err(Error::UnknownTag(tag)),
+            RESERVED_0...RESERVED_4 => return Err(Error::UnknownTag(tag)),
 
             CANONICAL_UNDEF => Tag::CanonicalUndef,
             FALSE => Tag::False,
@@ -151,15 +148,14 @@ impl<'a, 'b> Lexer<'a, 'b> {
 
             PAD => panic!("PAD should be handled in read_tag()"),
 
-            ARRAYREF_0...
-            ARRAYREF_15 => Tag::ArrayRef(tag - ARRAYREF_0),
+            ARRAYREF_0...ARRAYREF_15 => Tag::ArrayRef(tag - ARRAYREF_0),
 
-            HASHREF_0...
-            HASHREF_15 => Tag::HashRef(tag - HASHREF_0),
+            HASHREF_0...HASHREF_15 => Tag::HashRef(tag - HASHREF_0),
 
             SHORT_BINARY_0 => Tag::Bin(&[]),
-            SHORT_BINARY_1...
-            SHORT_BINARY_31 => Tag::Bin(self.read_bytes((tag - SHORT_BINARY_0) as u64)?),
+            SHORT_BINARY_1...SHORT_BINARY_31 => Tag::Bin(
+                self.read_bytes((tag - SHORT_BINARY_0) as u64)?,
+            ),
 
             _ => return Err(Error::UnknownTag(tag)),
         };

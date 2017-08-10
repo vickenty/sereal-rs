@@ -116,7 +116,10 @@ mod test {
         assert_eq!(t(b"\xff\xff\xff\xff\xff\xff\xff\xff\xff\x7f"), MAX);
 
         assert_eq!(e(b"\x80").kind(), io::ErrorKind::UnexpectedEof);
-        assert_eq!(format!("{}", e(b"\x80\x80\x80\x80\x80\x80\x80\x80\x80\x80\x00")), "varint overflow");
+        assert_eq!(
+            format!("{}", e(b"\x80\x80\x80\x80\x80\x80\x80\x80\x80\x80\x00")),
+            "varint overflow"
+        );
     }
 
     #[test]
@@ -149,6 +152,9 @@ mod test {
         assert_eq!(t(b"\xff\xff\xff\xff\xff\xff\xff\xff\xff\x7f"), MIN);
 
         assert_eq!(e(b"\x80").kind(), io::ErrorKind::UnexpectedEof);
-        assert_eq!(format!("{}", e(b"\x80\x80\x80\x80\x80\x80\x80\x80\x80\x80\x00")), "varint overflow");
+        assert_eq!(
+            format!("{}", e(b"\x80\x80\x80\x80\x80\x80\x80\x80\x80\x80\x00")),
+            "varint overflow"
+        );
     }
 }

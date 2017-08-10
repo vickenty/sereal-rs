@@ -1,6 +1,6 @@
 use std::io;
 use std::result;
-use byteorder::{ LittleEndian, ReadBytesExt };
+use byteorder::{LittleEndian, ReadBytesExt};
 use sereal_common::constants::*;
 
 use config::Config;
@@ -19,7 +19,7 @@ impl Error {
     pub fn is_invalid_magic(&self) -> bool {
         match self {
             &Error::InvalidMagic => true,
-            _ => false
+            _ => false,
         }
     }
 
@@ -64,7 +64,10 @@ pub type Result<T> = result::Result<T, Error>;
 pub enum DocumentType {
     Uncompressed,
     Snappy { compressed_size: u64 },
-    ZLib { compressed_size: u64, uncompressed_size: u64 },
+    ZLib {
+        compressed_size: u64,
+        uncompressed_size: u64,
+    },
     ZStd { compressed_size: u64 },
 }
 
@@ -121,23 +124,19 @@ impl Header {
             TYPE_RAW => DocumentType::Uncompressed,
 
             TYPE_SNAPPY if proto >= PROTO_V2 => {
-                DocumentType::Snappy {
-                    compressed_size: reader.read_varint()?,
-                }
-            },
+                DocumentType::Snappy { compressed_size: reader.read_varint()? }
+            }
 
             TYPE_ZLIB if proto >= PROTO_V3 => {
                 DocumentType::ZLib {
                     uncompressed_size: reader.read_varint()?,
                     compressed_size: reader.read_varint()?,
                 }
-            },
+            }
 
             TYPE_ZSTD if proto >= PROTO_V4 => {
-                DocumentType::ZStd {
-                    compressed_size: reader.read_varint()?
-                }
-            },
+                DocumentType::ZStd { compressed_size: reader.read_varint()? }
+            }
 
             _ => return Err(Error::InvalidType),
         };
@@ -165,7 +164,7 @@ impl Header {
 mod test {
     use std::io::Cursor;
     use config::Config;
-    use super::{ Error, Result, Header };
+    use super::{Error, Result, Header};
     use super::DocumentType::*;
 
     fn r(s: &[u8]) -> Result<Header> {
@@ -210,35 +209,53 @@ mod test {
 
     #[test]
     fn version2() {
-        assert_eq!(p(b"=srl\x02\x00"), Header {
-            doc_type: Uncompressed,
-            metadata: None,
-        });
+        assert_eq!(
+            p(b"=srl\x02\x00"),
+            Header {
+                doc_type: Uncompressed,
+                metadata: None,
+            }
+        );
 
-        assert_eq!(p(b"=srl\x22\x02\x01\x00\x0a"), Header {
-            doc_type: Snappy { compressed_size: 10 },
-            metadata: Some(vec![ 0 ]),
-        });
+        assert_eq!(
+            p(b"=srl\x22\x02\x01\x00\x0a"),
+            Header {
+                doc_type: Snappy { compressed_size: 10 },
+                metadata: Some(vec![0]),
+            }
+        );
     }
 
     #[test]
     fn version3() {
-        assert_eq!(p(b"=\xf3rl\x33\x02\x01\x00\x0a\x0b"), Header {
-            doc_type: ZLib { uncompressed_size: 10, compressed_size: 11 },
-            metadata: Some(vec![ 0 ]),
-        });
+        assert_eq!(
+            p(b"=\xf3rl\x33\x02\x01\x00\x0a\x0b"),
+            Header {
+                doc_type: ZLib {
+                    uncompressed_size: 10,
+                    compressed_size: 11,
+                },
+                metadata: Some(vec![0]),
+            }
+        );
     }
 
     #[test]
     fn version4() {
-        assert_eq!(p(b"=\xf3rl\x04\x00"), Header {
-            doc_type: Uncompressed,
-            metadata: None,
-        });
+        assert_eq!(
+            p(b"=\xf3rl\x04\x00"),
+            Header {
+                doc_type: Uncompressed,
+                metadata: None,
+            }
+        );
 
-        assert_eq!(p(b"=\xf3rl\x44\x00\x0a"), Header {
-            doc_type: ZStd { compressed_size: 10 },
-            metadata: None,
-        });
+        assert_eq!(
+            p(b"=\xf3rl\x44\x00\x0a"),
+            Header {
+                doc_type: ZStd { compressed_size: 10 },
+                metadata: None,
+            }
+        );
     }
 }

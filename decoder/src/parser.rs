@@ -1,7 +1,7 @@
 use std::result;
 use std::collections::HashMap;
 use config::Config;
-use reader::{ self, Reader };
+use reader::{self, Reader};
 
 #[derive(Debug)]
 pub enum Error {
@@ -125,16 +125,16 @@ impl<'a, 'buf, B: Builder<'buf>> Parser<'a, 'buf, B> {
             SHORT_BINARY_0...SHORT_BINARY_31 => {
                 let len = tag - SHORT_BINARY_0;
                 Ok(self.reader.read_bytes(len.into())?)
-            },
+            }
 
             STR_UTF8 | BINARY => {
                 let len = self.reader.read_varlen()?;
                 Ok(self.reader.read_bytes(len)?)
-            },
+            }
 
             COPY => Ok(self.do_copy(|p| p.parse_str())?),
 
-            _ => Err(Error::InvalidType)
+            _ => Err(Error::InvalidType),
         }
     }
 
@@ -168,64 +168,80 @@ impl<'a, 'buf, B: Builder<'buf>> Parser<'a, 'buf, B> {
             FALSE => value.set_false(),
 
             REFN => value.set_ref(self.parse()?),
+
             REFP => {
                 let p = self.reader.read_varlen()?;
                 value.set_ref(self.get(p)?);
-            },
+            }
+
             ALIAS => {
                 let p = self.reader.read_varlen()?;
                 value.set_alias(self.get(p)?)
-            },
+            }
+
             COPY => value.set_alias(self.do_copy(|p| p.parse())?),
+
             WEAKEN => value.set_weak_ref(self.parse()?),
+
             ARRAY => {
                 let len = self.reader.read_varint()?;
                 value.set_array(self.parse_array(len)?);
-            },
+            }
+
             ARRAYREF_0...ARRAYREF_15 => {
                 let len = tag - ARRAYREF_0;
                 let array = self.parse_array(len as u64)?;
                 let mut inner = self.builder.new();
                 inner.set_array(array);
                 value.set_ref(inner);
-            },
+            }
+
             HASH => {
                 let len = self.reader.read_varint()?;
                 value.set_hash(self.parse_hash(len)?);
-            },
+            }
+
             HASHREF_0...HASHREF_15 => {
                 let len = tag - HASHREF_0;
                 let hash = self.parse_hash(len as u64)?;
                 let mut inner = self.builder.new();
                 inner.set_hash(hash);
                 value.set_ref(inner);
-            },
+            }
 
             BINARY => {
                 let len = self.reader.read_varlen()?;
                 value.set_binary(self.reader.read_bytes(len)?);
-            },
+            }
 
             STR_UTF8 => {
                 let len = self.reader.read_varlen()?;
                 value.set_string(self.reader.read_bytes(len)?);
-            },
+            }
 
             SHORT_BINARY_0...SHORT_BINARY_31 => {
                 let len = tag - SHORT_BINARY_0;
                 value.set_binary(self.reader.read_bytes(len.into())?);
-            },
+            }
 
             OBJECT => value.set_object(self.parse_inner(true)?, self.parse()?)?,
+
             OBJECTV => {
                 let pos = self.reader.read_varlen()?;
                 value.set_object(self.get(pos)?, self.parse()?)?;
-            },
-            OBJECT_FREEZE => value.set_object_freeze(self.parse_inner(true)?, self.parse()?)?,
+            }
+
+            OBJECT_FREEZE => {
+                value.set_object_freeze(
+                    self.parse_inner(true)?,
+                    self.parse()?,
+                )?
+            }
+
             OBJECTV_FREEZE => {
                 let pos = self.reader.read_varlen()?;
                 value.set_object_freeze(self.get(pos)?, self.parse()?)?;
-            },
+            }
 
             REGEXP => value.set_regexp(self.parse()?, self.parse()?)?,
 
@@ -239,7 +255,7 @@ impl<'a, 'buf, B: Builder<'buf>> Parser<'a, 'buf, B> {
         self.track.get(&p).cloned().ok_or(Error::InvalidRef(p))
     }
 
-    fn do_copy<T, F: FnOnce(&mut Self) -> Result<T>>(&mut self, f: F)-> Result<T> {
+    fn do_copy<T, F: FnOnce(&mut Self) -> Result<T>>(&mut self, f: F) -> Result<T> {
         if self.copy_pos != 0 {
             return Err(Error::InvalidCopy);
         }
@@ -257,7 +273,10 @@ impl<'a, 'buf, B: Builder<'buf>> Parser<'a, 'buf, B> {
 
     fn parse_array(&mut self, count: u64) -> Result<<B::Value as Value<'buf>>::Array> {
         if count > self.config.max_array_size() {
-            return Err(Error::ArrayTooLarge { count: count, limit: self.config.max_array_size() });
+            return Err(Error::ArrayTooLarge {
+                count: count,
+                limit: self.config.max_array_size(),
+            });
         }
 
         let mut v = self.builder.build_array(count);
@@ -270,7 +289,10 @@ impl<'a, 'buf, B: Builder<'buf>> Parser<'a, 'buf, B> {
 
     fn parse_hash(&mut self, count: u64) -> Result<<B::Value as Value<'buf>>::Hash> {
         if count > self.config.max_hash_size() {
-            return Err(Error::HashTooLarge { count: count, limit: self.config.max_hash_size() });
+            return Err(Error::HashTooLarge {
+                count: count,
+                limit: self.config.max_hash_size(),
+            });
         }
 
         let old_copy_pos = self.copy_pos;
