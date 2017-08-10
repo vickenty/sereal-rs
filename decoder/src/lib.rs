@@ -24,6 +24,7 @@ pub mod arena;
 pub mod de;
 
 mod varint;
+mod reader;
 
 use std::io;
 use std::io::Read;

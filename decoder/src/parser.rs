@@ -1,11 +1,7 @@
 use std::result;
 use std::collections::HashMap;
-
-use byteorder::LittleEndian;
-use byteorder::ByteOrder;
-
 use config::Config;
-use varint;
+use reader::{ self, Reader };
 
 #[derive(Debug)]
 pub enum Error {
@@ -35,11 +31,12 @@ impl Error {
     }
 }
 
-impl From<varint::Error> for Error {
-    fn from(e: varint::Error) -> Error {
+impl From<reader::Error> for Error {
+    fn from(e: reader::Error) -> Error {
         match e {
-            varint::Error::UnexpectedEof => Error::UnexpectedEof,
-            varint::Error::Overflow => Error::VarintOverflow,
+            reader::Error::UnexpectedEof => Error::UnexpectedEof,
+            reader::Error::OffsetOverflow => Error::OffsetOverflow,
+            reader::Error::VarintOverflow => Error::VarintOverflow,
         }
     }
 }
@@ -97,8 +94,7 @@ pub trait Builder<'buf> {
 
 pub struct Parser<'a, 'buf, B: Builder<'buf>> {
     config: &'a Config,
-    input: &'buf [u8],
-    pos: usize,
+    reader: Reader<'buf>,
     track: HashMap<usize, B::Value>,
     builder: B,
     copy_pos: usize,
@@ -108,8 +104,7 @@ impl<'a, 'buf, B: Builder<'buf>> Parser<'a, 'buf, B> {
     pub fn new(builder: B, config: &'a Config, input: &'buf [u8]) -> Parser<'a, 'buf, B> {
         Parser {
             config: config,
-            input: input,
-            pos: 0,
+            reader: Reader::new(input),
             track: HashMap::new(),
             builder: builder,
             copy_pos: 0,
@@ -123,21 +118,21 @@ impl<'a, 'buf, B: Builder<'buf>> Parser<'a, 'buf, B> {
     fn parse_str(&mut self) -> Result<&'buf [u8]> {
         use sereal_common::constants::*;
 
-        let tag = self.read_tag()?;
+        let tag = self.reader.read_tag()?;
         let tag = tag & TYPE_MASK;
 
         match tag {
             SHORT_BINARY_0...SHORT_BINARY_31 => {
                 let len = tag - SHORT_BINARY_0;
-                self.read_bytes(len.into())
+                Ok(self.reader.read_bytes(len.into())?)
             },
 
             STR_UTF8 | BINARY => {
-                let len = self.read_varlen()?;
-                self.read_bytes(len)
+                let len = self.reader.read_varlen()?;
+                Ok(self.reader.read_bytes(len)?)
             },
 
-            COPY => self.do_copy(|p| p.parse_str()),
+            COPY => Ok(self.do_copy(|p| p.parse_str())?),
 
             _ => Err(Error::InvalidType)
         }
@@ -146,7 +141,8 @@ impl<'a, 'buf, B: Builder<'buf>> Parser<'a, 'buf, B> {
     fn parse_inner(&mut self, force_track: bool) -> Result<B::Value> {
         use sereal_common::constants::*;
 
-        let tag = self.read_tag()?;
+        let tag = self.reader.read_tag()?;
+        println!("{} {:x}", self.reader.pos(), tag);
 
         let track = tag & TRACK_BIT != 0;
         let tag = tag & TYPE_MASK;
@@ -154,7 +150,7 @@ impl<'a, 'buf, B: Builder<'buf>> Parser<'a, 'buf, B> {
         let mut value = self.builder.new();
 
         if track || force_track {
-            self.track.insert(self.pos, value.clone());
+            self.track.insert(self.reader.pos(), value.clone());
         }
 
         match tag {
@@ -163,27 +159,27 @@ impl<'a, 'buf, B: Builder<'buf>> Parser<'a, 'buf, B> {
             POS_0...POS_15 => value.set_u64(tag as u64),
             NEG_16...NEG_1 => value.set_i64((tag | 0xf0) as i64),
 
-            VARINT => value.set_u64(self.read_varint()?),
-            ZIGZAG => value.set_i64(self.read_zigzag()?),
-            FLOAT => value.set_f32(self.read_f32()?),
-            DOUBLE => value.set_f64(self.read_f64()?),
+            VARINT => value.set_u64(self.reader.read_varint()?),
+            ZIGZAG => value.set_i64(self.reader.read_zigzag()?),
+            FLOAT => value.set_f32(self.reader.read_f32()?),
+            DOUBLE => value.set_f64(self.reader.read_f64()?),
 
             TRUE => value.set_true(),
             FALSE => value.set_false(),
 
             REFN => value.set_ref(self.parse()?),
             REFP => {
-                let p = self.read_varlen()?;
+                let p = self.reader.read_varlen()?;
                 value.set_ref(self.get(p)?);
             },
             ALIAS => {
-                let p = self.read_varlen()?;
+                let p = self.reader.read_varlen()?;
                 value.set_alias(self.get(p)?)
             },
             COPY => value.set_alias(self.do_copy(|p| p.parse())?),
             WEAKEN => value.set_weak_ref(self.parse()?),
             ARRAY => {
-                let len = self.read_varint()?;
+                let len = self.reader.read_varint()?;
                 value.set_array(self.parse_array(len)?);
             },
             ARRAYREF_0...ARRAYREF_15 => {
@@ -194,7 +190,7 @@ impl<'a, 'buf, B: Builder<'buf>> Parser<'a, 'buf, B> {
                 value.set_ref(inner);
             },
             HASH => {
-                let len = self.read_varint()?;
+                let len = self.reader.read_varint()?;
                 value.set_hash(self.parse_hash(len)?);
             },
             HASHREF_0...HASHREF_15 => {
@@ -206,28 +202,28 @@ impl<'a, 'buf, B: Builder<'buf>> Parser<'a, 'buf, B> {
             },
 
             BINARY => {
-                let len = self.read_varlen()?;
-                value.set_binary(self.read_bytes(len)?);
+                let len = self.reader.read_varlen()?;
+                value.set_binary(self.reader.read_bytes(len)?);
             },
 
             STR_UTF8 => {
-                let len = self.read_varlen()?;
-                value.set_string(self.read_bytes(len)?);
+                let len = self.reader.read_varlen()?;
+                value.set_string(self.reader.read_bytes(len)?);
             },
 
             SHORT_BINARY_0...SHORT_BINARY_31 => {
                 let len = tag - SHORT_BINARY_0;
-                value.set_binary(self.read_bytes(len.into())?);
+                value.set_binary(self.reader.read_bytes(len.into())?);
             },
 
             OBJECT => value.set_object(self.parse_inner(true)?, self.parse()?)?,
             OBJECTV => {
-                let pos = self.read_varlen()?;
+                let pos = self.reader.read_varlen()?;
                 value.set_object(self.get(pos)?, self.parse()?)?;
             },
             OBJECT_FREEZE => value.set_object_freeze(self.parse_inner(true)?, self.parse()?)?,
             OBJECTV_FREEZE => {
-                let pos = self.read_varlen()?;
+                let pos = self.reader.read_varlen()?;
                 value.set_object_freeze(self.get(pos)?, self.parse()?)?;
             },
 
@@ -243,82 +239,17 @@ impl<'a, 'buf, B: Builder<'buf>> Parser<'a, 'buf, B> {
         self.track.get(&p).cloned().ok_or(Error::InvalidRef(p))
     }
 
-    fn read_tag(&mut self) -> Result<u8> {
-        loop {
-            use sereal_common::constants::{ TYPE_MASK, PAD };
-            if self.pos >= self.input.len() {
-                return Err(Error::UnexpectedEof);
-            }
-
-            let tag = self.input[self.pos];
-            self.pos += 1;
-            if tag & TYPE_MASK != PAD {
-                return Ok(tag);
-            }
-        }
-    }
-
-    fn read_f32(&mut self) -> Result<f32> {
-        let buf = &self.input[self.pos..];
-        if buf.len() < 4 {
-            return Err(Error::UnexpectedEof);
-        }
-        self.pos += 4;
-        Ok(LittleEndian::read_f32(buf))
-    }
-
-    fn read_f64(&mut self) -> Result<f64> {
-        let buf = &self.input[self.pos..];
-        if buf.len() < 8 {
-            return Err(Error::UnexpectedEof);
-        }
-        self.pos += 8;
-        Ok(LittleEndian::read_f64(buf))
-    }
-
-    fn read_varint(&mut self) -> Result<u64> {
-        let (val, len) = varint::parse_varint(&self.input[self.pos..])?;
-        self.pos += len;
-        Ok(val)
-    }
-
-    fn read_zigzag(&mut self) -> Result<i64> {
-        let (val, len) = varint::parse_zigzag(&self.input[self.pos..])?;
-        self.pos += len;
-        Ok(val)
-    }
-
-    fn read_varlen(&mut self) -> Result<usize> {
-        let len = self.read_varint()?;
-        if len < usize::max_value() as u64 {
-            Ok(len as usize)
-        } else {
-            Err(Error::OffsetOverflow)
-        }
-    }
-
-    fn read_bytes(&mut self, len: usize) -> Result<&'buf [u8]> {
-        let beg = self.pos;
-        self.pos = self.pos.checked_add(len).ok_or(Error::OffsetOverflow)?;
-        if self.pos <= self.input.len() {
-            Ok(&self.input[beg..self.pos])
-        } else {
-            Err(Error::UnexpectedEof)
-        }
-    }
-
     fn do_copy<T, F: FnOnce(&mut Self) -> Result<T>>(&mut self, f: F)-> Result<T> {
         if self.copy_pos != 0 {
             return Err(Error::InvalidCopy);
         }
 
-        let pos = self.read_varlen()?;
-        self.copy_pos = self.pos;
-        self.pos = pos - 1;
+        let pos = self.reader.read_varlen()?;
+        self.copy_pos = self.reader.set_pos(pos - 1);
 
         let val = f(self);
 
-        self.pos = self.copy_pos;
+        self.reader.set_pos(self.copy_pos);
         self.copy_pos = 0;
 
         val
