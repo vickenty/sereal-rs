@@ -16,15 +16,14 @@ extern crate zstd;
 
 pub mod config;
 pub mod header;
-pub mod lexer;
 pub mod parser;
+pub mod reader;
 
 pub mod arc;
 pub mod arena;
 pub mod de;
 
 mod varint;
-mod reader;
 
 use std::io;
 use std::io::Read;

@@ -3,20 +3,21 @@ use std::fmt;
 use std::collections::BTreeSet;
 
 use serde::de;
+use sereal_common::constants::*;
 
-use lexer;
-use lexer::Lexer;
-use lexer::Tag;
 use config::Config;
+use reader::{self, Reader};
 
 pub enum Error {
-    InvalidRef(u64),
+    UnexpectedEof,
+    OffsetOverflow,
+    VarintOverflow,
+    InvalidRef(usize),
     Custom(String),
-    Lexer(lexer::Error),
 }
 
 impl Error {
-    pub fn as_invalid_ref(&self) -> Option<u64> {
+    pub fn as_invalid_ref(&self) -> Option<usize> {
         match self {
             &Error::InvalidRef(p) => Some(p),
             _ => None,
@@ -26,10 +27,13 @@ impl Error {
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            &Error::InvalidRef(p) => write!(f, "invalid reference {}", p),
-            &Error::Custom(ref b) => write!(f, "{}", b),
-            &Error::Lexer(ref l) => write!(f, "lexer error: {:?}", l),
+        use self::Error::*;
+        match *self {
+            UnexpectedEof | OffsetOverflow | VarintOverflow => {
+                write!(f, "{}", error::Error::description(self))
+            }
+            InvalidRef(p) => write!(f, "invalid reference {}", p),
+            Custom(ref b) => write!(f, "{}", b),
         }
     }
 }
@@ -42,10 +46,13 @@ impl fmt::Debug for Error {
 
 impl error::Error for Error {
     fn description(&self) -> &str {
-        match self {
-            &Error::InvalidRef(_) => "invalid reference",
-            &Error::Custom(_) => "custom error",
-            &Error::Lexer(_) => "lexing error",
+        use self::Error::*;
+        match *self {
+            UnexpectedEof => "unexpected eof",
+            OffsetOverflow => "offset overflow",
+            VarintOverflow => "varint overflow",
+            InvalidRef(_) => "invalid reference",
+            Custom(_) => "custom error",
         }
     }
 }
@@ -56,21 +63,27 @@ impl de::Error for Error {
     }
 }
 
-impl From<lexer::Error> for Error {
-    fn from(e: lexer::Error) -> Error {
-        Error::Lexer(e)
+impl From<reader::Error> for Error {
+    fn from(e: reader::Error) -> Error {
+        match e {
+            reader::Error::UnexpectedEof => Error::UnexpectedEof,
+            reader::Error::OffsetOverflow => Error::OffsetOverflow,
+            reader::Error::VarintOverflow => Error::OffsetOverflow,
+        }
     }
 }
 
 pub struct Deserializer<'cfg, 'b> {
-    lexer: Lexer<'cfg, 'b>,
-    seen: BTreeSet<u64>,
+    config: &'cfg Config,
+    reader: Reader<'b>,
+    seen: BTreeSet<usize>,
 }
 
 impl<'cfg, 'b> Deserializer<'cfg, 'b> {
     pub fn new(config: &'cfg Config, input: &'b [u8]) -> Self {
         Deserializer {
-            lexer: Lexer::new(config, input),
+            config: config,
+            reader: Reader::new(input),
             seen: BTreeSet::new(),
         }
     }
@@ -80,39 +93,67 @@ impl<'cfg, 'a, 'de> de::Deserializer<'de> for &'a mut Deserializer<'cfg, 'de> {
     type Error = Error;
 
     fn deserialize_any<V: de::Visitor<'de>>(mut self, visitor: V) -> Result<V::Value, Error> {
-        let token = self.lexer.next()?;
+        let tag = self.reader.read_tag()? & TYPE_MASK;
 
-        match token.tag {
-            Tag::Pos(v) => visitor.visit_u8(v),
-            Tag::Neg(v) => visitor.visit_i8(v),
-            Tag::Float(v) => visitor.visit_f32(v),
-            Tag::Double(v) => visitor.visit_f64(v),
-            Tag::Bin(v) => visitor.visit_borrowed_bytes(v),
-            Tag::Str(v) => visitor.visit_borrowed_bytes(v),
-            Tag::Array(v) => visitor.visit_seq(Seq::new(self, v)),
-            Tag::ArrayRef(v) => visitor.visit_seq(Seq::new(self, v as u64)),
-            Tag::Undef => visitor.visit_none(),
-            Tag::Refn => visitor.visit_some(self),
-            Tag::Refp(p) => {
-                let cur = self.lexer.tell()?;
+        match tag {
+            POS_0...POS_15 => visitor.visit_u8(tag),
+            NEG_16...NEG_1 => visitor.visit_i8((tag | 0xf0) as i8),
+            FLOAT => visitor.visit_f32(self.reader.read_f32()?),
+            DOUBLE => visitor.visit_f64(self.reader.read_f64()?),
 
-                if self.seen.contains(&p) || p >= cur {
+            BINARY | STR_UTF8 => {
+                let len = self.reader.read_varlen()?;
+                visitor.visit_borrowed_bytes(self.reader.read_bytes(len)?)
+            }
+
+            SHORT_BINARY_0...SHORT_BINARY_31 => {
+                let len = tag - SHORT_BINARY_0;
+                visitor.visit_borrowed_bytes(self.reader.read_bytes(len as usize)?)
+            }
+
+            ARRAY => {
+                let len = self.reader.read_varint()?;
+                visitor.visit_seq(Seq::new(self, len))
+            }
+
+            ARRAYREF_0...ARRAYREF_15 => {
+                let len = tag - ARRAYREF_0;
+                visitor.visit_seq(Seq::new(self, len as u64))
+            }
+
+            UNDEF | CANONICAL_UNDEF => visitor.visit_none(),
+
+            REFN => visitor.visit_some(self),
+
+            REFP => {
+                let p = self.reader.read_varlen()?;
+
+                if self.seen.contains(&p) || p >= self.reader.pos() {
                     return Err(Error::InvalidRef(p));
                 }
 
                 self.seen.insert(p);
-                self.lexer.seek(p)?;
+                let prev = self.reader.set_pos(p - 1);
 
                 let res = visitor.visit_some(&mut *self);
 
-                self.lexer.seek(cur)?;
+                self.reader.set_pos(prev);
                 self.seen.remove(&p);
 
                 res
             }
-            Tag::Hash(v) => visitor.visit_map(Map::new(self, v)),
-            Tag::HashRef(v) => visitor.visit_map(Map::new(self, v as u64)),
-            _ => unimplemented!(),
+
+            HASHREF_0...HASHREF_15 => {
+                let len = tag - HASHREF_0;
+                visitor.visit_map(Map::new(self, len as u64))
+            }
+
+            _ => {
+                panic!(
+                    "tag type {tag} (0x{tag:02x}) not implemented yet",
+                    tag = tag
+                )
+            }
         }
     }
 
