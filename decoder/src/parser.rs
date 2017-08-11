@@ -142,7 +142,6 @@ impl<'a, 'buf, B: Builder<'buf>> Parser<'a, 'buf, B> {
         use sereal_common::constants::*;
 
         let tag = self.reader.read_tag()?;
-        println!("{} {:x}", self.reader.pos(), tag);
 
         let track = tag & TRACK_BIT != 0;
         let tag = tag & TYPE_MASK;
